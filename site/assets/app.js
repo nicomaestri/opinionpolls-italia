@@ -9,7 +9,7 @@ function colorOf(party) {
   let hash=0;for(const ch of party)hash=((hash*33)+ch.codePointAt(0))>>>0;
   return EXTRA_COLORS[hash%EXTRA_COLORS.length];
 }
-const state = {polls:[], selected:new Set(DEFAULT_PARTIES), tab:'trend', span:0.30, from:'', to:'', boxParty:'FdI', scale:'share', corrMode:'changes'};
+const state = {polls:[], selected:new Set(DEFAULT_PARTIES), tab:'trend', span:0.30, from:'', to:'', boxParty:'FdI', scale:'share', corrMode:'changes',cvView:'cv',houseView:'ranking',houseParty:'FdI'};
 const $ = id => document.getElementById(id);
 const dateUTC = date => new Date(`${date}T12:00:00Z`);
 const toISO = date => date.toISOString().slice(0,10);
@@ -112,11 +112,12 @@ const config={
 // with rotated boxplot labels and the annotations in correlation heatmaps.
 function withChartSignature(layout) {
   const bottomMargin = layout.margin?.b ?? 100;
+  const compact = typeof window!=='undefined' && window.matchMedia('(max-width:680px)').matches && !layout.width;
   const signature = {
     xref:'paper',yref:'paper',x:0,y:0,
     xanchor:'left',yanchor:'bottom',yshift:18-bottomMargin,
     showarrow:false,align:'left',
-    text:`<a href="${GITHUB_URL}" target="_blank">${BRAND_LABEL}</a>`,
+    text:`<a href="${GITHUB_URL}" target="_blank">${compact ? "Opinion Polls Italia · GitHub" : BRAND_LABEL}</a>`,
     font:{family:'DM Sans,Arial,sans-serif',size:11,color:'#64748b'}
   };
   return {...layout,annotations:[...(layout.annotations||[]),signature]};
@@ -162,6 +163,59 @@ function renderCV(rows) {
   }
   const layout=layoutBase();layout.yaxis.title='Coefficiente di variazione tra istituti (%)';layout.yaxis.ticksuffix='%';
   return {traces,layout,description:`${count} coppie partito-settimana con almeno 3 istituti. La dispersione include anche differenze temporali all'interno della settimana.`};
+}
+
+// Fixed-effects OLS for the second panel of "Variabilità tra istituti".
+// Every estimate is recomputed on the visitor's chosen date window.
+function renderHouseEffects(rows) {
+  if(typeof HouseEffects==='undefined')return {traces:[],layout:layoutBase(),description:'Modulo OLS non disponibile. Aggiorna la pagina.'};
+  const analysis=state.houseView;
+  if(analysis==='ranking') {
+    const party=state.houseParty;
+    const result=HouseEffects.estimate(rows,party);
+    if(!result.ok)return {traces:[],layout:layoutBase(),description:`${party}: non stimabile. ${result.reason} Estendi l’intervallo temporale.`};
+    const data=result.effects;
+    const trace={type:'bar',orientation:'h',y:data.map(d=>d.firm),x:data.map(d=>d.effect),
+      marker:{color:data.map(d=>d.effect>=0?'#d26773':'#4274ba')},
+      customdata:data.map(d=>[d.observations,d.polls]),
+      hovertemplate:'%{y}<br>House effect: %{x:+.2f} pp<br>Settimane: %{customdata[0]}<br>Sondaggi: %{customdata[1]}<extra></extra>'};
+    const layout=layoutBase();
+    layout.height=Math.max(460,200+data.length*29);
+    layout.margin={l:165,r:35,t:22,b:102};layout.showlegend=false;
+    layout.xaxis={...axes,title:'Effetto fisso rispetto alla media degli istituti (punti percentuali)',ticksuffix:' pp',zeroline:true,zerolinecolor:'#7486a0',zerolinewidth:1.3};
+    layout.yaxis={...axes,type:'category',automargin:false,showgrid:false,autorange:'reversed'};
+    return {traces:[trace],layout,description:`${party}: ${data.length} istituti confrontabili, ${result.weekCount} settimane, ${result.n} coppie istituto-settimana. Effetti relativi, normalizzati a somma zero; non misurano l'errore rispetto al consenso vero.${result.excludedFirms?` ${result.excludedFirms} istituti esclusi perché non connessi temporalmente.`:''}`};
+  }
+  const names=selectedParties(),fits=names.map(p=>HouseEffects.estimate(rows,p));
+  const available=fits.filter(f=>f.ok);
+  if(!available.length)return {traces:[],layout:layoutBase(),description:'Nessun partito selezionato dispone di sufficiente sovrapposizione tra istituti e settimane nel periodo.'};
+  const firms=Array.from(new Set(available.flatMap(f=>f.effects.map(e=>e.firm)))).sort((a,b)=>a.localeCompare(b));
+  const valueMap=new Map(available.map(f=>[f.party,new Map(f.effects.map(e=>[e.firm,e]))]));
+  const z=firms.map(f=>names.map(p=>valueMap.get(p)?.get(f)?.effect??null));
+  const custom=firms.map(f=>names.map(p=>valueMap.get(p)?.get(f)?.observations??null));
+  let maximum=.5;
+  for(const row of z)for(const val of row)if(val!==null)maximum=Math.max(maximum,Math.abs(val));
+  maximum=Math.min(4,Math.ceil(maximum*2)/2);
+  const trace={type:'heatmap',x:names,y:firms,z,zmin:-maximum,zmax:maximum,zmid:0,
+    colorscale:[[0,'#4274ba'],[.5,'#f7f9fc'],[1,'#d26773']],xgap:3,ygap:3,
+    colorbar:{title:{text:'pp',side:'right'},thickness:12,len:.79},
+    customdata:custom,
+    hoverongaps:false,
+    hovertemplate:'%{y} · %{x}<br>House effect: %{z:+.2f} pp<br>Settimane osservate: %{customdata}<extra>OLS a effetti fissi</extra>'};
+  const labels=[];
+  if(names.length<=9&&firms.length<=19){
+    for(let i=0;i<firms.length;i++)for(let j=0;j<names.length;j++){
+      const v=z[i][j];if(v===null)continue;
+      labels.push({x:names[j],y:firms[i],xref:'x',yref:'y',text:v.toFixed(2),showarrow:false,
+        font:{size:11,color:Math.abs(v)>maximum*.63?'#fff':'#284261'}});
+    }
+  }
+  const layout=layoutBase();layout.showlegend=false;
+  layout.height=Math.max(485,195+firms.length*31);layout.margin={l:160,r:110,t:18,b:108};
+  layout.xaxis={...axes,type:'category',showgrid:false,side:'bottom'};
+  layout.yaxis={...axes,type:'category',showgrid:false,autorange:'reversed',tickfont:{size:11,color:'#354963'}};
+  layout.annotations=labels;
+  return {traces:[trace],layout,description:`House effects OLS in punti percentuali, stimati per partito con effetti fissi settimanali. ${available.length}/${names.length} partiti stimabili. Il bianco/grigio indica assenza di dati sufficienti; le scale sono comuni alle celle. Le stime sono relative agli istituti inclusi in ciascun partito, quindi i confronti tra colonne richiedono prudenza.`};
 }
 
 function median(a){const x=a.slice().sort((u,v)=>u-v);return x.length%2 ? x[(x.length-1)/2] : (x[x.length/2-1]+x[x.length/2])/2;}
@@ -254,7 +308,7 @@ function renderCorrelations(rows) {
 const tabMetadata={
   trend:['Trend delle intenzioni di voto','Medie settimanali con uguale peso per istituto e regressione locale LOWESS.'],
   ci:['Intervalli di confidenza campionari','Ogni punto rappresenta un sondaggio; le barre indicano un IC teorico binomiale al 95%.'],
-  cv:['Quanto differiscono gli istituti?','CV settimanale tra istituti per ciascun partito, con almeno tre istituti nella settimana.'],
+  cv:['Variabilità tra istituti','Dispersione osservata (CV) e differenze sistematiche tra istituti stimate con effetti fissi OLS.'],
   box:['Distribuzione storica per istituto','Boxplot dei sondaggi per istituto nel periodo selezionato. Scegli il partito da confrontare.'],
   corr:['Correlazioni tra partiti','Matrice di Pearson delle curve LOWESS: confronta livelli oppure variazioni settimanali.']
 };
@@ -271,6 +325,25 @@ function render(){
     }
     sel.addEventListener('change',e=>{state.scale=e.target.value;render();});$('chart-tools').append(sel);
   }
+  if(state.tab==='cv'){
+    const view=document.createElement('select');view.setAttribute('aria-label','Analisi della variabilità tra istituti');
+    for(const [value,label] of [['cv','Dispersione: CV settimanale'],['house','House effects · OLS']]) {
+      const o=document.createElement('option');o.value=value;o.textContent=label;o.selected=state.cvView===value;view.append(o);
+    }
+    view.addEventListener('change',e=>{state.cvView=e.target.value;render();});$('chart-tools').append(view);
+    if(state.cvView==='house'){
+      const v=document.createElement('select');v.setAttribute('aria-label','Vista degli house effects');
+      for(const [value,label] of [['ranking','Classifica per istituto'],['matrix','Matrice istituti × partiti']]) {
+        const o=document.createElement('option');o.value=value;o.textContent=label;o.selected=state.houseView===value;v.append(o);
+      }
+      v.addEventListener('change',e=>{state.houseView=e.target.value;render();});$('chart-tools').append(v);
+      if(state.houseView==='ranking'){
+        const p=document.createElement('select');p.setAttribute('aria-label','Partito per gli house effects');
+        PARTY_NAMES.forEach(party=>{const o=document.createElement('option');o.value=party;o.textContent=`Partito: ${party}`;o.selected=party===state.houseParty;p.append(o);});
+        p.addEventListener('change',e=>{state.houseParty=e.target.value;render();});$('chart-tools').append(p);
+      }
+    }
+  }
   if(state.tab==='box'){
     const sel=document.createElement('select');sel.setAttribute('aria-label','Partito per boxplot');
     PARTY_NAMES.forEach(p=>{const option=document.createElement('option');option.value=p;option.textContent=`Partito: ${p}`;option.selected=p===state.boxParty;sel.append(option);});
@@ -284,26 +357,29 @@ function render(){
     sel.addEventListener('change',e=>{state.corrMode=e.target.value;render();});$('chart-tools').append(sel);
   }
   const rows=filtered();
-  const res=state.tab==='trend'?renderTrend(rows):state.tab==='ci'?renderCI(rows):state.tab==='cv'?renderCV(rows):state.tab==='box'?renderBox(rows):renderCorrelations(rows);
+  const res=state.tab==='trend'?renderTrend(rows):state.tab==='ci'?renderCI(rows):state.tab==='cv'?(state.cvView==='house'?renderHouseEffects(rows):renderCV(rows)):state.tab==='box'?renderBox(rows):renderCorrelations(rows);
   $('chart-summary').textContent=res.description;
   $('empty-state').hidden=res.traces.length>0;
   const wrap=document.querySelector('.plot-wrap');
-  wrap.classList.toggle('corr-scroll',state.tab==='corr');
-  if(state.tab==='corr') {
-    // A full 15-party matrix stays legible on phones via internal horizontal scrolling.
+  wrap.classList.toggle('corr-scroll',state.tab==='corr'||(state.tab==='cv'&&state.cvView==='house'&&state.houseView==='matrix'));
+  if(state.tab==='corr'||(state.tab==='cv'&&state.cvView==='house'&&state.houseView==='matrix')) {
+    // Large matrices stay legible on phones via internal horizontal scrolling.
     wrap.style.setProperty('--corr-min-width',`${Math.max(610,selectedParties().length*58+165)}px`);
   } else wrap.style.removeProperty('--corr-min-width');
   const mobile=window.matchMedia('(max-width:680px)').matches;
   const layout = {...res.layout};
-  if(mobile && state.tab!=='corr') {
+  if(mobile && !(state.tab==='corr'||(state.tab==='cv'&&state.cvView==='house'&&state.houseView==='matrix'))) {
     layout.margin={...layout.margin,l:47,r:18,t:108,b:state.tab==='box'?145:98};
     layout.legend={...layout.legend,font:{size:10},y:1.07};
-    layout.height=515;
+    layout.height=state.tab==='cv'&&state.cvView==='house'?Math.max(515,res.layout.height):515;
+    if(state.tab==='cv'&&state.cvView==='house')layout.margin.l=112;
   }
-  if(mobile && state.tab==='corr') {
-    layout.height=Math.max(460,120+selectedParties().length*49);
-    layout.margin={...layout.margin,l:65,r:83,b:88};
+  if(mobile && (state.tab==='corr'||(state.tab==='cv'&&state.cvView==='house'&&state.houseView==='matrix'))) {
+    layout.height=state.tab==='corr'?Math.max(460,120+selectedParties().length*49):res.layout.height;
+    layout.margin={...layout.margin,l:state.tab==='corr'?65:150,r:83,b:88};
   }
+  // Let the containing card grow with long institute rankings and heatmaps.
+  $('chart').style.height=`${layout.height || (mobile?515:460)}px`;
   lastRender={traces:res.traces,layout, title, desc};
   if(typeof Plotly!=='undefined')Plotly.react('chart',res.traces,withChartSignature(layout),config);
   else $('empty-state').textContent='Impossibile caricare Plotly. Controlla la connessione a Internet e riprova.';
@@ -323,15 +399,16 @@ function exportHeading() {
     ? 'Medie settimanali · LOWESS · indice base 100'
     : 'Medie settimanali · LOWESS · percentuali';
   if(state.tab==='box') return `Distribuzione dei sondaggi per istituto · ${state.boxParty}`;
+  if(state.tab==='cv')return state.cvView==='house' ? (state.houseView==='ranking'?`OLS con effetti fissi settimanali · ${state.houseParty}`:'OLS con effetti fissi settimanali · matrice per partito') : 'Coefficiente di variazione settimanale per partito';
   return tabMetadata[state.tab][1];
 }
 function exportLayoutForPng() {
   const l=JSON.parse(JSON.stringify(lastRender.layout));
   // The export must be independent of the screen width or scroll position.
   l.width=1600;
-  l.height=state.tab==='corr' ? Math.max(780,205+selectedParties().length*58) : 820;
-  l.margin={...l.margin,l:state.tab==='corr'?135:85,r:state.tab==='corr'?150:65,t:145,b:state.tab==='box'?175:112};
-  if(state.tab==='corr') {
+  l.height=state.tab==='corr' ? Math.max(780,205+selectedParties().length*58) : (state.tab==='cv'&&state.cvView==='house' ? Math.max(800,lastRender.layout.height+140) : 820);
+  l.margin={...l.margin,l:state.tab==='corr'?135:(state.tab==='cv'&&state.cvView==='house'?200:85),r:state.tab==='corr'?150:65,t:145,b:state.tab==='box'?175:112};
+  if(state.tab==='corr'||(state.tab==='cv'&&state.cvView==='house'&&state.houseView==='matrix')) {
     l.xaxis.tickfont={size:15,color:'#354963'};
     l.yaxis.tickfont={size:15,color:'#354963'};
   }
@@ -396,7 +473,7 @@ function setup(){
     render();
   }));
   $('reset-filters').addEventListener('click',()=>{
-    state.from=earliest;state.to=latest;state.span=.30;state.scale='share';state.corrMode='changes';state.selected=new Set(DEFAULT_PARTIES.filter(p=>PARTY_NAMES.includes(p))); 
+    state.from=earliest;state.to=latest;state.span=.30;state.scale='share';state.corrMode='changes';state.cvView='cv';state.houseView='ranking';state.houseParty='FdI';state.selected=new Set(DEFAULT_PARTIES.filter(p=>PARTY_NAMES.includes(p))); 
     $('date-from').value=earliest;$('date-to').value=latest;$('lowess-span').value=30;$('span-label').textContent='30%';updatePartyFilters();render();
   });
   $('export-chart').addEventListener('click', exportChartPng);

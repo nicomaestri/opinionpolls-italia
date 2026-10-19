@@ -62,3 +62,10 @@
  .panel-header{gap:6px}
  .reset-button{padding:8px}
 }
+
+/* v6: adjacent OLS analysis in the existing institutional-variability section. */
+#chart-tools{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+#chart-tools select{max-width:100%;min-width:0}
+.equation{font:600 15px/1.6 Georgia,'Times New Roman',serif;letter-spacing:.1px;color:#243c63;background:#f6f9fd;border-left:3px solid #7e9ce3;padding:11px 12px;margin:11px 0 14px;overflow-x:auto;white-space:nowrap}
+.methodology .notes-grid article:nth-child(4){grid-column:span 2}
+@media(max-width:680px){#chart-tools{width:100%;justify-content:stretch}#chart-tools select{width:100%}.methodology .notes-grid article:nth-child(4){grid-column:auto}.equation{font-size:13px}}
