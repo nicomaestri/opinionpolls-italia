@@ -9,3 +9,56 @@
 .brand{letter-spacing:-.9px}
 @media(max-width:950px){.notes-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:680px){.notes-grid{grid-template-columns:1fr}.tab{padding:14px 11px}.brand{font-size:17px}}
+
+
+/* v5: responsive layout and landscape correlation matrix */
+.plot-wrap.corr-scroll{overflow-x:auto;overscroll-behavior-x:contain;scrollbar-color:#bdcde4 #eef2f9;scrollbar-width:thin}
+.plot-wrap.corr-scroll #chart{min-width:var(--corr-min-width,610px)}
+.export-button:disabled{opacity:.6;cursor:progress}
+@media(max-width:950px){
+ .controls{gap:12px}
+ .tab{padding-inline:10px}
+ .chart-heading{align-items:flex-start}
+}
+@media(max-width:680px){
+ .shell{width:100%;max-width:100%;overflow-x:clip}
+ .topbar{gap:10px}
+ .header-right{min-width:0}
+ #sync-state{white-space:nowrap;text-overflow:ellipsis;overflow:hidden;max-width:120px}
+ .intro{min-height:0;padding:35px 5% 28px}
+ .intro h1{font-size:clamp(28px,8.5vw,39px);letter-spacing:-1px}
+ .intro-foot{gap:7px;margin-top:22px}
+ .source-chip{font-size:9px;padding:6px}
+ .source-chip strong{font-size:10px}
+ .metrics{gap:8px}
+ .metric{min-width:0;padding:13px 12px}
+ .metric-label{font-size:9px;letter-spacing:.5px}
+ .metric-value{font-size:clamp(19px,6vw,25px)}
+ .metric-value.date-value{font-size:clamp(14px,4.6vw,18px)}
+ .controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .control-control{min-width:0;width:100%}
+ .control-control input[type=date]{font-size:12px;padding-inline:5px;min-width:0}
+ .control-slider{grid-column:1/-1}
+ .party-pill{min-height:35px}
+ .nav-wrapper{gap:0;scrollbar-width:thin;scroll-snap-type:x proximity}
+ .tab{scroll-snap-align:start;min-height:49px}
+ .chart-heading{display:flex;flex-direction:column;gap:12px}
+ .chart-heading>div{max-width:100%}
+ #chart-tools{width:100%}
+ #chart-tools select{display:block;width:100%;max-width:100%;font-size:12px;min-height:41px}
+ .plot-wrap{min-height:450px;margin-inline:0}
+ .plot-wrap.corr-scroll{margin:0 7px}
+ .plot-wrap.corr-scroll::after{content:'Scorri orizzontalmente per esplorare la matrice →';position:sticky;left:8px;bottom:0;display:block;width:max-content;max-width:95%;font-size:10px;color:#748196;background:#fff;padding:3px 6px;border-radius:3px;pointer-events:none}
+ .chart-footer{display:flex;flex-direction:column;align-items:stretch;gap:14px}
+ .chart-footer>span{max-width:100%}
+ .export-button{width:100%;min-height:43px}
+}
+@media(max-width:380px){
+ .header-right{gap:5px}
+ #sync-state{max-width:100px}
+ .brand{font-size:16px}
+ .metrics{gap:6px}
+ .metric{padding:10px 9px}
+ .panel-header{gap:6px}
+ .reset-button{padding:8px}
+}

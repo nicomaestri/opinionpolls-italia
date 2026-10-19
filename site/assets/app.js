@@ -102,7 +102,8 @@ const GITHUB_URL = 'https://github.com/nicomaestri/opinionpolls-italia';
 const BRAND_LABEL = 'Opinion Polls Italia · github.com/nicomaestri/opinionpolls-italia';
 const config={
   responsive:true,displaylogo:false,scrollZoom:false,
-  modeBarButtonsToRemove:['lasso2d','select2d','autoScale2d','toggleSpikelines'],
+  // The dedicated PNG button below the chart includes title, mode and attribution.
+  modeBarButtonsToRemove:['toImage','lasso2d','select2d','autoScale2d','toggleSpikelines'],
   toImageButtonOptions:{format:'png',filename:'opinionpolls-italia',width:1400,height:650,scale:2}
 };
 
@@ -230,16 +231,19 @@ function renderCorrelations(rows) {
     hovertemplate:'%{y} × %{x}<br>Correlazione: %{z:.3f}<br>Settimane comuni: %{customdata}<extra></extra>',
     xgap:4,ygap:4};
   const annotations=[];
+  const labelSize = names.length >= 12 ? 10 : names.length >= 9 ? 12 : 15;
   for(let i=0;i<names.length;i++)for(let j=0;j<names.length;j++){
     annotations.push({x:names[j],y:names[i],xref:'x',yref:'y',text:text[i][j],
-      showarrow:false,font:{family:'DM Sans,Arial,sans-serif',size:14,color:labelColors[i][j]}});
+      showarrow:false,font:{family:'DM Sans,Arial,sans-serif',size:labelSize,color:labelColors[i][j]}});
   }
   const layout=layoutBase();
   layout.showlegend=false;
-  layout.margin={l:85,r:45,t:20,b:100};
-  layout.height=Math.max(460, 75+names.length*38);
-  layout.xaxis={...axes,type:'category',side:'bottom',showgrid:false,tickfont:{size:13,color:'#354963'}};
-  layout.yaxis={...axes,type:'category',autorange:'reversed',showgrid:false,scaleanchor:'x',scaleratio:1,tickfont:{size:13,color:'#354963'}};
+  layout.margin={l:80,r:90,t:24,b:96};
+  layout.height=Math.max(470, 120+names.length*50);
+  // Avoid scaleanchor/scaleratio: a correlation matrix need not use square cells.
+  // Plotly will stretch it into the available rectangular area.
+  layout.xaxis={...axes,type:'category',side:'bottom',showgrid:false,tickfont:{size:names.length>10?11:13,color:'#354963'}};
+  layout.yaxis={...axes,type:'category',autorange:'reversed',showgrid:false,tickfont:{size:names.length>10?11:13,color:'#354963'}};
   layout.annotations=annotations;
   const desc=state.corrMode==='changes'
     ? 'Correlazione di Pearson delle variazioni settimanali in punti percentuali delle curve LOWESS. Si usano solo settimane consecutive e comuni.'
@@ -254,6 +258,8 @@ const tabMetadata={
   box:['Distribuzione storica per istituto','Boxplot dei sondaggi per istituto nel periodo selezionato. Scegli il partito da confrontare.'],
   corr:['Correlazioni tra partiti','Matrice di Pearson delle curve LOWESS: confronta livelli oppure variazioni settimanali.']
 };
+
+let lastRender=null;
 
 function render(){
   const [title, desc]=tabMetadata[state.tab];$('chart-title').textContent=title;$('chart-description').textContent=desc;
@@ -281,8 +287,84 @@ function render(){
   const res=state.tab==='trend'?renderTrend(rows):state.tab==='ci'?renderCI(rows):state.tab==='cv'?renderCV(rows):state.tab==='box'?renderBox(rows):renderCorrelations(rows);
   $('chart-summary').textContent=res.description;
   $('empty-state').hidden=res.traces.length>0;
-  if(typeof Plotly!=='undefined')Plotly.react('chart',res.traces,withChartSignature(res.layout),config);
+  const wrap=document.querySelector('.plot-wrap');
+  wrap.classList.toggle('corr-scroll',state.tab==='corr');
+  if(state.tab==='corr') {
+    // A full 15-party matrix stays legible on phones via internal horizontal scrolling.
+    wrap.style.setProperty('--corr-min-width',`${Math.max(610,selectedParties().length*58+165)}px`);
+  } else wrap.style.removeProperty('--corr-min-width');
+  const mobile=window.matchMedia('(max-width:680px)').matches;
+  const layout = {...res.layout};
+  if(mobile && state.tab!=='corr') {
+    layout.margin={...layout.margin,l:47,r:18,t:108,b:state.tab==='box'?145:98};
+    layout.legend={...layout.legend,font:{size:10},y:1.07};
+    layout.height=515;
+  }
+  if(mobile && state.tab==='corr') {
+    layout.height=Math.max(460,120+selectedParties().length*49);
+    layout.margin={...layout.margin,l:65,r:83,b:88};
+  }
+  lastRender={traces:res.traces,layout, title, desc};
+  if(typeof Plotly!=='undefined')Plotly.react('chart',res.traces,withChartSignature(layout),config);
   else $('empty-state').textContent='Impossibile caricare Plotly. Controlla la connessione a Internet e riprova.';
+}
+
+
+// Prepare a separate high-resolution figure to guarantee that exported PNGs
+// contain the chart's on-page heading, the chosen method and the GitHub credit.
+function escapeMarkup(value) {
+  return String(value).replace(/[&<>]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]));
+}
+function exportHeading() {
+  if(state.tab==='corr') return state.corrMode==='changes'
+    ? 'Pearson r · variazioni settimanali delle curve LOWESS'
+    : 'Pearson r · livelli delle curve LOWESS';
+  if(state.tab==='trend') return state.scale==='index'
+    ? 'Medie settimanali · LOWESS · indice base 100'
+    : 'Medie settimanali · LOWESS · percentuali';
+  if(state.tab==='box') return `Distribuzione dei sondaggi per istituto · ${state.boxParty}`;
+  return tabMetadata[state.tab][1];
+}
+function exportLayoutForPng() {
+  const l=JSON.parse(JSON.stringify(lastRender.layout));
+  // The export must be independent of the screen width or scroll position.
+  l.width=1600;
+  l.height=state.tab==='corr' ? Math.max(780,205+selectedParties().length*58) : 820;
+  l.margin={...l.margin,l:state.tab==='corr'?135:85,r:state.tab==='corr'?150:65,t:145,b:state.tab==='box'?175:112};
+  if(state.tab==='corr') {
+    l.xaxis.tickfont={size:15,color:'#354963'};
+    l.yaxis.tickfont={size:15,color:'#354963'};
+  }
+  l.annotations=[...(l.annotations||[]),
+    {xref:'paper',yref:'paper',x:0,y:1,xanchor:'left',yanchor:'bottom',yshift:78,showarrow:false,
+      font:{family:'Arial,sans-serif',size:28,color:'#1c2740'},text:`<b>${escapeMarkup(lastRender.title)}</b>`},
+    {xref:'paper',yref:'paper',x:0,y:1,xanchor:'left',yanchor:'bottom',yshift:45,showarrow:false,
+      font:{family:'Arial,sans-serif',size:17,color:'#6e7f9a'},text:escapeMarkup(exportHeading())},
+    {xref:'paper',yref:'paper',x:0,y:1,xanchor:'left',yanchor:'bottom',yshift:20,showarrow:false,
+      font:{family:'Arial,sans-serif',size:14,color:'#94a1b1'},
+      text:`Periodo: ${escapeMarkup(state.from)} — ${escapeMarkup(state.to)} · LOWESS: ${Math.round(state.span*100)}%`}
+  ];
+  return withChartSignature(l);
+}
+async function exportChartPng() {
+  if(typeof Plotly==='undefined' || !lastRender || !lastRender.traces.length) return;
+  const button=$('export-chart');
+  const original=button.textContent;
+  button.disabled=true;button.textContent='Preparazione PNG…';
+  const tmp=document.createElement('div');
+  const layout=exportLayoutForPng();
+  tmp.style.cssText=`position:fixed;left:-100000px;top:0;width:${layout.width}px;height:${layout.height}px;pointer-events:none`;
+  document.body.appendChild(tmp);
+  try {
+    await Plotly.newPlot(tmp,lastRender.traces,layout,{displayModeBar:false,staticPlot:true,responsive:false});
+    await Plotly.downloadImage(tmp,{format:'png',width:layout.width,height:layout.height,scale:2,
+      filename:`opinionpolls-italia-${state.tab}`});
+  } catch(err) {
+    console.error('Errore esportazione PNG',err);
+    window.alert('Impossibile esportare il PNG. Riprova tra qualche istante.');
+  } finally {
+    Plotly.purge(tmp);tmp.remove();button.disabled=false;button.textContent=original;
+  }
 }
 
 function updatePartyFilters(){
@@ -317,7 +399,7 @@ function setup(){
     state.from=earliest;state.to=latest;state.span=.30;state.scale='share';state.corrMode='changes';state.selected=new Set(DEFAULT_PARTIES.filter(p=>PARTY_NAMES.includes(p))); 
     $('date-from').value=earliest;$('date-to').value=latest;$('lowess-span').value=30;$('span-label').textContent='30%';updatePartyFilters();render();
   });
-  $('export-chart').addEventListener('click',()=>{if(typeof Plotly!=='undefined')Plotly.downloadImage($('chart'),{format:'png',width:1400,height:650,scale:2,filename:`opinionpolls-italia-${state.tab}`});});
+  $('export-chart').addEventListener('click', exportChartPng);
   $('metric-polls').textContent=numFmt(state.polls.length);
   $('metric-firms').textContent=numFmt(new Set(state.polls.map(p=>p.firm)).size);
   $('metric-date').textContent=fmtDate(latest);
