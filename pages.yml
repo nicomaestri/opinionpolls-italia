@@ -1,0 +1,57 @@
+name: Update data and publish site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # Every 6 hours, non-round minute reduces Actions scheduling congestion (UTC).
+    - cron: '23 1,7,13,19 * * *'
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install data dependencies
+        run: pip install -r requirements.txt
+      - name: Check parser and correlation calculations
+        run: |
+          python -m unittest discover -s tests -v
+          node tests/correlation.test.cjs
+      - name: Fetch new polls (retain last snapshot when source is unavailable)
+        run: python scripts/fetch_polls.py
+      - name: Commit any new data
+        run: |
+          if ! git diff --quiet -- site/data/polls.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add site/data/polls.json
+            git commit -m "data: refresh Italian opinion polls"
+            git push
+          fi
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

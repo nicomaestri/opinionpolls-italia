@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Dashboard interattiva dei sondaggi elettorali italiani: LOWESS, intervalli campionari, variabilità tra istituti, boxplot storici e correlazioni tra partiti.">
+  <title>OpinionPolls Italia — Sondaggi e incertezza</title>
+  <link rel="stylesheet" href="assets/style.css">
+  <script defer src="assets/plotly.min.js"></script>
+  <script defer src="assets/app.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="#home" aria-label="OpinionPolls Italia, homepage"><span class="brand-mark">◈</span><span>Opinion<span class="brand-contrast">Polls</span><small>ITALIA</small></span></a>
+      <div class="header-right"><span class="live-dot" aria-hidden="true"></span><span id="sync-state">Caricamento dati</span><a class="github-link" href="https://en.wikipedia.org/wiki/Opinion_polling_for_the_next_Italian_general_election" target="_blank" rel="noopener noreferrer">Wikipedia <span aria-hidden="true">↗</span></a></div>
+    </header>
+
+    <main id="home">
+      <section class="intro">
+        <div class="eyebrow"><span class="eyebrow-line"></span> OSSERVATORIO ELETTORALE INDIPENDENTE</div>
+        <h1>I sondaggi, <em>oltre il numero.</em></h1>
+        <p>Serie storiche, tendenze e misura dell'incertezza. Esplora come cambiano le intenzioni di voto e quanto differiscono le rilevazioni.</p>
+        <div class="intro-foot"><span class="source-chip">DATI <strong>Wikipedia · Party vote</strong></span><span class="source-chip">METODO <strong>Analisi statistica trasparente</strong></span></div>
+      </section>
+
+      <section class="metrics" aria-label="Riepilogo archivio">
+        <div class="metric"><div class="metric-label">SONDAGGI DISPONIBILI</div><div class="metric-value" id="metric-polls">—</div><div class="metric-meta">rilevazioni nell'archivio</div></div>
+        <div class="metric"><div class="metric-label">ISTITUTI DI RICERCA</div><div class="metric-value" id="metric-firms">—</div><div class="metric-meta">fonti distinte</div></div>
+        <div class="metric"><div class="metric-label">ULTIMA RILEVAZIONE</div><div class="metric-value date-value" id="metric-date">—</div><div class="metric-meta">data centrale del fieldwork</div></div>
+        <div class="metric"><div class="metric-label">ULTIMO AGGIORNAMENTO</div><div class="metric-value date-value" id="metric-update">—</div><div class="metric-meta">sincronizzazione dell'archivio</div></div>
+      </section>
+
+      <section class="workbench" aria-label="Esplora i sondaggi">
+        <div class="panel-header"><div><div class="overline">ESPLORA I DATI</div><h2>Dashboard interattiva</h2></div><button id="reset-filters" class="reset-button" type="button">↻ Ripristina filtri</button></div>
+        <div class="controls">
+          <div class="control-control"><label for="date-from">Dal</label><input id="date-from" type="date"></div>
+          <div class="control-control"><label for="date-to">Al</label><input id="date-to" type="date"></div>
+          <div class="control-control control-slider"><label for="lowess-span">Ampiezza LOWESS <strong id="span-label">30%</strong></label><input id="lowess-span" type="range" min="10" max="70" step="5" value="30"></div>
+        </div>
+        <div class="party-section"><div class="minor-heading">PARTITI <span>Seleziona uno o più partiti</span></div><div id="party-filters" class="party-filters" role="group" aria-label="Filtra partiti"></div></div>
+        <div class="nav-wrapper" role="tablist" aria-label="Sezione di analisi">
+          <button class="tab active" role="tab" aria-selected="true" data-tab="trend">01 <span>Serie storiche</span></button>
+          <button class="tab" role="tab" aria-selected="false" data-tab="ci">02 <span>Intervalli di confidenza</span></button>
+          <button class="tab" role="tab" aria-selected="false" data-tab="cv">03 <span>Variabilità tra istituti</span></button>
+          <button class="tab" role="tab" aria-selected="false" data-tab="box">04 <span>Distribuzione per istituto</span></button>
+          <button class="tab" role="tab" aria-selected="false" data-tab="corr">05 <span>Correlazioni</span></button>
+        </div>
+        <div class="chart-heading"><div><h3 id="chart-title">Trend delle intenzioni di voto</h3><p id="chart-description">Media settimanale con eguale peso per istituto e curva di regressione LOWESS.</p></div><div id="chart-tools"></div></div>
+        <div class="plot-wrap"><div id="chart" role="img" aria-label="Grafico interattivo dei sondaggi"></div><div id="empty-state" class="empty-state" hidden>Nessun dato disponibile con questi filtri. Prova ad ampliare l'intervallo o selezionare altri partiti.</div></div>
+        <div class="chart-footer"><span id="chart-summary"></span><button type="button" class="export-button" id="export-chart">↓ Esporta grafico PNG</button></div>
+      </section>
+
+      <section class="methodology" aria-labelledby="methods-title"><div class="overline">NOTE METODOLOGICHE</div><h2 id="methods-title">Come leggere questi dati</h2>
+        <div class="notes-grid"><article><span class="note-index">01 / TREND</span><h3>Media e LOWESS</h3><p>Per ogni settimana, prima si mediano gli eventuali sondaggi ripetuti dello stesso istituto, poi si attribuisce uguale peso agli istituti. LOWESS è una regressione locale descrittiva, non una previsione.</p></article><article><span class="note-index">02 / CAMPIONE</span><h3>Intervalli teorici 95%</h3><p>Per ogni sondaggio con numerosità <em>n</em> nota, è mostrato ±1,96√[p(1−p)/n]. È un'approssimazione binomiale sotto campionamento casuale semplice: non include pesi, disegno complesso o errori sistematici.</p></article><article><span class="note-index">03 / ISTITUTI</span><h3>Coefficiente di variazione</h3><p>Settimanalmente: CV = 100 × deviazione standard campionaria delle quote degli istituti / loro media. Si richiedono almeno tre istituti; il CV rappresenta dispersione osservata, non un intervallo di confidenza né un house effect causale.</p></article><article><span class="note-index">04 / DISTRIBUZIONI</span><h3>Boxplot per istituto</h3><p>La scatola mostra i quartili delle rilevazioni per ciascun istituto nel periodo selezionato; sono visibili mediana, baffi e valori anomali. Le differenze possono riflettere anche il periodo di fieldwork.</p></article><article><span class="note-index">05 / CORRELAZIONI</span><h3>Correlazioni LOWESS</h3><p>Correlazione di Pearson tra partiti: sui livelli smussati oppure sulle loro differenze settimanali. Si confrontano solo settimane comuni (minimo 8). I livelli possono riflettere trend condivisi o correlazioni spurie; il vincolo di somma delle quote può generare correlazioni negative. Non si possono dedurre flussi di elettori.</p></article></div>
+      </section>
+    </main>
+    <footer><div><strong>OpinionPolls Italia</strong> · Progetto indipendente, non affiliato a partiti o istituti.</div><div>Fonte operativa: <a href="https://en.wikipedia.org/wiki/Opinion_polling_for_the_next_Italian_general_election" target="_blank" rel="noopener noreferrer">Wikipedia ↗</a>. Per le schede metodologiche consultare il <a href="https://www.sondaggipoliticoelettorali.it/" target="_blank" rel="noopener noreferrer">portale ufficiale ↗</a>. Contenuti Wikipedia soggetti alla licenza indicata sulla pagina.</div></footer>
+  </div>
+</body>
+</html>
