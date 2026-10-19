@@ -2,28 +2,6 @@
 
 Un sito pubblico e gratuito per esplorare i sondaggi italiani con cinque analisi interattive: **medie settimanali + LOWESS**, **IC campionari 95%**, **CV settimanale tra istituti**, **boxplot per istituto**, **matrice di correlazione LOWESS**. Frontend statico (`site/`), Python per il download e GitHub Actions per aggiornare e pubblicare.
 
-## Uso in locale
-
-```bash
-python -m http.server 8000 --directory site
-```
-
-Apri `http://localhost:8000`. Non aprire direttamente `site/index.html` via `file://`, perché `fetch()` potrebbe non caricare il file JSON.
-
-Per recuperare manualmente i dati più recenti:
-
-```bash
-pip install -r requirements.txt
-python scripts/fetch_polls.py
-```
-
-Per eseguire i test del parser:
-
-```bash
-python -m unittest discover -s tests -v
-node tests/correlation.test.cjs
-```
-
 ## Che cosa misura ciascun grafico
 
 1. **Trend**: si calcola la media dei sondaggi dello stesso istituto nella stessa settimana (`W-SUN`), poi la media delle medie degli istituti (peso uguale per istituto). Si applica LOWESS robusto alle medie settimanali; ampiezza regolabile (10–70%). La prima analisi consente di passare da quote percentuali a un indice base 100 (prima settimana selezionata = 100), come nel notebook originario. Il campo data si riferisce al punto centrale dell'intervallo di fieldwork.
