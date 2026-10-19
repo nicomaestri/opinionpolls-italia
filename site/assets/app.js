@@ -1,8 +1,15 @@
 'use strict';
 
-const PARTY_NAMES = ['FdI', 'PD', 'M5S', 'Lega', 'FI', 'AVS'];
-const COLORS = {FdI:'#436ad9', PD:'#d34f60', M5S:'#ce9c24', Lega:'#349a74', FI:'#5e9cc9', AVS:'#9873c8'};
-const state = {polls:[], selected:new Set(PARTY_NAMES), tab:'trend', span:0.30, from:'', to:'', boxParty:'FdI', scale:'share', corrMode:'changes'};
+const DEFAULT_PARTIES = ['FdI', 'PD', 'M5S', 'Lega', 'FI', 'AVS'];
+let PARTY_NAMES = [...DEFAULT_PARTIES];
+const COLORS = {FdI:'#436ad9', PD:'#d34f60', M5S:'#ce9c24', Lega:'#349a74', FI:'#5e9cc9', AVS:'#9873c8', A:'#be754a', IV:'#8c62b1', '+E':'#e58a5a', NM:'#657f97', ScN:'#488a8c', PLD:'#b86c8d', FN:'#5d526f', DSP:'#8b8d39', Others:'#85909c'};
+const EXTRA_COLORS = ['#3b8f83','#b97463','#789bc4','#bd698c','#8e82ac','#b09342'];
+function colorOf(party) {
+  if(COLORS[party]) return COLORS[party];
+  let hash=0;for(const ch of party)hash=((hash*33)+ch.codePointAt(0))>>>0;
+  return EXTRA_COLORS[hash%EXTRA_COLORS.length];
+}
+const state = {polls:[], selected:new Set(DEFAULT_PARTIES), tab:'trend', span:0.30, from:'', to:'', boxParty:'FdI', scale:'share', corrMode:'changes'};
 const $ = id => document.getElementById(id);
 const dateUTC = date => new Date(`${date}T12:00:00Z`);
 const toISO = date => date.toISOString().slice(0,10);
@@ -81,8 +88,9 @@ const axes={
   tickfont:{color:'#8593aa',size:11}, titlefont:{color:'#7a879b',size:11}
 };
 const layoutBase=()=>({
-  paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#ffffff',
-  margin:{l:60,r:25,t:18,b:72},
+  // White, opaque background on the website AND in exported PNG files.
+  paper_bgcolor:'#ffffff',plot_bgcolor:'#ffffff',
+  margin:{l:60,r:25,t:18,b:100},
   font:{family:'DM Sans,Arial,sans-serif',color:'#495b76',size:12},
   legend:{orientation:'h',x:0,y:1.15,yanchor:'bottom',font:{size:11},tracegroupgap:4},
   hovermode:'closest',
@@ -90,7 +98,28 @@ const layoutBase=()=>({
   yaxis:{...axes,title:'Intenzioni di voto (%)',ticksuffix:'%',rangemode:'tozero'},
   showlegend:true
 });
-const config={responsive:true,displaylogo:false,scrollZoom:false,modeBarButtonsToRemove:['lasso2d','select2d','autoScale2d','toggleSpikelines']};
+const GITHUB_URL = 'https://github.com/nicomaestri/opinionpolls-italia';
+const BRAND_LABEL = 'Opinion Polls Italia · github.com/nicomaestri/opinionpolls-italia';
+const config={
+  responsive:true,displaylogo:false,scrollZoom:false,
+  modeBarButtonsToRemove:['lasso2d','select2d','autoScale2d','toggleSpikelines'],
+  toImageButtonOptions:{format:'png',filename:'opinionpolls-italia',width:1400,height:650,scale:2}
+};
+
+// Keep the signature within a reserved white footer in every plot.
+// Its anchor is defined in pixels from the chart bottom, so it works
+// with rotated boxplot labels and the annotations in correlation heatmaps.
+function withChartSignature(layout) {
+  const bottomMargin = layout.margin?.b ?? 100;
+  const signature = {
+    xref:'paper',yref:'paper',x:0,y:0,
+    xanchor:'left',yanchor:'bottom',yshift:18-bottomMargin,
+    showarrow:false,align:'left',
+    text:`<a href="${GITHUB_URL}" target="_blank">${BRAND_LABEL}</a>`,
+    font:{family:'DM Sans,Arial,sans-serif',size:11,color:'#64748b'}
+  };
+  return {...layout,annotations:[...(layout.annotations||[]),signature]};
+}
 
 function renderTrend(rows) {
   const traces=[]; let total=0;
@@ -98,8 +127,8 @@ function renderTrend(rows) {
     const agg=weeklyStats(rows,party);if(!agg.length) continue;
     total+=agg.length;
     const levels=state.scale==='index' ? agg.map(v=>100*v.mean/agg[0].mean) : agg.map(v=>v.mean);
-    traces.push({x:agg.map(v=>v.date),y:levels,name:`${party} · media sett.`,type:'scatter',mode:'lines+markers',line:{color:COLORS[party],width:1},marker:{color:COLORS[party],size:5},opacity:.36,legendgroup:party,hovertemplate:`${party} · %{x}<br>Media: %{y:.2f}%<extra></extra>`});
-    if(agg.length>=3)traces.push({x:agg.map(v=>v.date),y:lowess(agg.map((v,i)=>({date:v.date,y:levels[i]})),state.span),name:`${party} · LOWESS`,type:'scatter',mode:'lines',line:{color:COLORS[party],width:3.3},legendgroup:party,hovertemplate:`${party} · LOWESS<br>%{x}: %{y:.2f}%<extra></extra>`});
+    traces.push({x:agg.map(v=>v.date),y:levels,name:`${party} · media sett.`,type:'scatter',mode:'lines+markers',line:{color:colorOf(party),width:1},marker:{color:colorOf(party),size:5},opacity:.36,legendgroup:party,hovertemplate:`${party} · %{x}<br>Media: %{y:.2f}%<extra></extra>`});
+    if(agg.length>=3)traces.push({x:agg.map(v=>v.date),y:lowess(agg.map((v,i)=>({date:v.date,y:levels[i]})),state.span),name:`${party} · LOWESS`,type:'scatter',mode:'lines',line:{color:colorOf(party),width:3.3},legendgroup:party,hovertemplate:`${party} · LOWESS<br>%{x}: %{y:.2f}%<extra></extra>`});
   }
   const layout=layoutBase();
   if(state.scale==='index'){layout.yaxis={...axes,title:'Indice (prima settimana = 100)',ticksuffix:'',rangemode:'normal'};}
@@ -115,9 +144,9 @@ function renderCI(rows) {
     if(!p.length)continue;
     count+=p.length;
     const halfwidths=p.map(v=>1.96*100*Math.sqrt((v[party]/100)*(1-v[party]/100)/v.n));
-    traces.push({type:'scatter',mode:'markers',x:p.map(v=>v.date),y:p.map(v=>v[party]),name:`${party} · sondaggi`,legendgroup:party,marker:{size:6,color:COLORS[party],opacity:.55},error_y:{type:'data',array:halfwidths,visible:true,color:COLORS[party]+'66',thickness:.7,width:1.7},customdata:p.map((v,i)=>[v.firm,v.n,halfwidths[i],Math.max(0,v[party]-halfwidths[i]),Math.min(100,v[party]+halfwidths[i])]),hovertemplate:`${party} · %{x}<br>Istituto: %{customdata[0]}<br>Stima: %{y:.1f}%<br>Campione: %{customdata[1]}<br>IC 95%: [%{customdata[3]:.2f}%, %{customdata[4]:.2f}%]<extra>IC teorico</extra>`});
+    traces.push({type:'scatter',mode:'markers',x:p.map(v=>v.date),y:p.map(v=>v[party]),name:`${party} · sondaggi`,legendgroup:party,marker:{size:6,color:colorOf(party),opacity:.55},error_y:{type:'data',array:halfwidths,visible:true,color:colorOf(party)+'66',thickness:.7,width:1.7},customdata:p.map((v,i)=>[v.firm,v.n,halfwidths[i],Math.max(0,v[party]-halfwidths[i]),Math.min(100,v[party]+halfwidths[i])]),hovertemplate:`${party} · %{x}<br>Istituto: %{customdata[0]}<br>Stima: %{y:.1f}%<br>Campione: %{customdata[1]}<br>IC 95%: [%{customdata[3]:.2f}%, %{customdata[4]:.2f}%]<extra>IC teorico</extra>`});
     const agg=weeklyStats(rows,party);
-    if(agg.length>=3)traces.push({type:'scatter',mode:'lines',x:agg.map(v=>v.date),y:lowess(agg.map(v=>({date:v.date,y:v.mean})),state.span),name:`${party} · LOWESS`,legendgroup:party,line:{color:COLORS[party],width:2.7},hovertemplate:`LOWESS ${party}: %{y:.2f}%<extra></extra>`});
+    if(agg.length>=3)traces.push({type:'scatter',mode:'lines',x:agg.map(v=>v.date),y:lowess(agg.map(v=>({date:v.date,y:v.mean})),state.span),name:`${party} · LOWESS`,legendgroup:party,line:{color:colorOf(party),width:2.7},hovertemplate:`LOWESS ${party}: %{y:.2f}%<extra></extra>`});
   }
   return {traces,layout:layoutBase(),description:`${numFmt(count)} osservazioni con numerosità nota. ${numFmt(without)} misure senza n escluse dagli IC (non dalle altre analisi).`};
 }
@@ -128,7 +157,7 @@ function renderCV(rows) {
     const agg=weeklyStats(rows,party).filter(v=>v.firms>=3 && isValue(v.cv));
     if (!agg.length) continue;
     count+=agg.length;
-    traces.push({x:agg.map(v=>v.date),y:agg.map(v=>v.cv),name:party,type:'scatter',mode:'lines+markers',line:{color:COLORS[party],width:2},marker:{size:5},customdata:agg.map(v=>[v.firms,v.sd]),hovertemplate:`${party} · %{x}<br>CV: %{y:.2f}%<br>Istituti: %{customdata[0]}<br>Deviazione standard: %{customdata[1]:.2f} pp<extra></extra>`});
+    traces.push({x:agg.map(v=>v.date),y:agg.map(v=>v.cv),name:party,type:'scatter',mode:'lines+markers',line:{color:colorOf(party),width:2},marker:{size:5},customdata:agg.map(v=>[v.firms,v.sd]),hovertemplate:`${party} · %{x}<br>CV: %{y:.2f}%<br>Istituti: %{customdata[0]}<br>Deviazione standard: %{customdata[1]:.2f} pp<extra></extra>`});
   }
   const layout=layoutBase();layout.yaxis.title='Coefficiente di variazione tra istituti (%)';layout.yaxis.ticksuffix='%';
   return {traces,layout,description:`${count} coppie partito-settimana con almeno 3 istituti. La dispersione include anche differenze temporali all'interno della settimana.`};
@@ -140,9 +169,9 @@ function renderBox(rows) {
   const groups=new Map();
   for(const p of rows){if(!isValue(p[party]))continue;if(!groups.has(p.firm))groups.set(p.firm,[]);groups.get(p.firm).push(p[party]);}
   const sorted=Array.from(groups).filter(([_,a])=>a.length>=3).sort((a,b)=>median(b[1])-median(a[1]));
-  const traces=sorted.map(([firm,values])=>({type:'box',name:firm,y:values,marker:{color:COLORS[party],size:3},line:{color:COLORS[party],width:1.6},fillcolor:COLORS[party]+'22',boxpoints:'outliers',whiskerwidth:.5,hovertemplate:`${firm}<br>Voto: %{y:.2f}%<extra>${values.length} rilevazioni</extra>`,showlegend:false}));
+  const traces=sorted.map(([firm,values])=>({type:'box',name:firm,y:values,marker:{color:colorOf(party),size:3},line:{color:colorOf(party),width:1.6},fillcolor:colorOf(party)+'22',boxpoints:'outliers',whiskerwidth:.5,hovertemplate:`${firm}<br>Voto: %{y:.2f}%<extra>${values.length} rilevazioni</extra>`,showlegend:false}));
   const layout=layoutBase();layout.xaxis={...axes,type:'category',tickangle:-38,automargin:true};layout.yaxis={...axes,title:`${party} · intenzioni di voto (%)`,ticksuffix:'%'};
-  layout.margin={l:60,r:15,t:15,b:115};layout.showlegend=false;
+  layout.margin={l:60,r:15,t:15,b:145};layout.showlegend=false;
   return {traces,layout,description:`${sorted.length} istituti con almeno 3 sondaggi per ${party} nel periodo. Ordinamento per mediana decrescente.`};
 }
 
@@ -207,7 +236,8 @@ function renderCorrelations(rows) {
   }
   const layout=layoutBase();
   layout.showlegend=false;
-  layout.margin={l:85,r:45,t:20,b:65};
+  layout.margin={l:85,r:45,t:20,b:100};
+  layout.height=Math.max(460, 75+names.length*38);
   layout.xaxis={...axes,type:'category',side:'bottom',showgrid:false,tickfont:{size:13,color:'#354963'}};
   layout.yaxis={...axes,type:'category',autorange:'reversed',showgrid:false,scaleanchor:'x',scaleratio:1,tickfont:{size:13,color:'#354963'}};
   layout.annotations=annotations;
@@ -251,7 +281,7 @@ function render(){
   const res=state.tab==='trend'?renderTrend(rows):state.tab==='ci'?renderCI(rows):state.tab==='cv'?renderCV(rows):state.tab==='box'?renderBox(rows):renderCorrelations(rows);
   $('chart-summary').textContent=res.description;
   $('empty-state').hidden=res.traces.length>0;
-  if(typeof Plotly!=='undefined')Plotly.react('chart',res.traces,res.layout,config);
+  if(typeof Plotly!=='undefined')Plotly.react('chart',res.traces,withChartSignature(res.layout),config);
   else $('empty-state').textContent='Impossibile caricare Plotly. Controlla la connessione a Internet e riprova.';
 }
 
@@ -259,7 +289,7 @@ function updatePartyFilters(){
   $('party-filters').innerHTML='';
   for(const party of PARTY_NAMES){
     const selected=state.selected.has(party);
-    const b=document.createElement('button');b.type='button';b.className='party-pill'+(selected?' active':'');b.style.setProperty('--party',COLORS[party]);
+    const b=document.createElement('button');b.type='button';b.className='party-pill'+(selected?' active':'');b.style.setProperty('--party',colorOf(party));
     b.setAttribute('aria-pressed',String(selected));b.innerHTML=`<span class="point" aria-hidden="true"></span>${party}`;
     b.addEventListener('click',()=>{
       if(selected && state.selected.size===1)return;
@@ -284,10 +314,10 @@ function setup(){
     render();
   }));
   $('reset-filters').addEventListener('click',()=>{
-    state.from=earliest;state.to=latest;state.span=.30;state.scale='share';state.corrMode='changes';state.selected=new Set(PARTY_NAMES);
+    state.from=earliest;state.to=latest;state.span=.30;state.scale='share';state.corrMode='changes';state.selected=new Set(DEFAULT_PARTIES.filter(p=>PARTY_NAMES.includes(p))); 
     $('date-from').value=earliest;$('date-to').value=latest;$('lowess-span').value=30;$('span-label').textContent='30%';updatePartyFilters();render();
   });
-  $('export-chart').addEventListener('click',()=>{if(typeof Plotly!=='undefined')Plotly.downloadImage($('chart'),{format:'png',width:1400,height:650,filename:`opinionpolls-italia-${state.tab}`});});
+  $('export-chart').addEventListener('click',()=>{if(typeof Plotly!=='undefined')Plotly.downloadImage($('chart'),{format:'png',width:1400,height:650,scale:2,filename:`opinionpolls-italia-${state.tab}`});});
   $('metric-polls').textContent=numFmt(state.polls.length);
   $('metric-firms').textContent=numFmt(new Set(state.polls.map(p=>p.firm)).size);
   $('metric-date').textContent=fmtDate(latest);
@@ -303,6 +333,11 @@ async function init(){
     const data=await response.json();
     state.polls=(data.polls||[]).filter(p=>/^20\d\d-\d\d-\d\d$/.test(p.date)&&p.firm);
     if(!state.polls.length)throw new Error('Archivio vuoto');
+    const present = (data.parties || []).filter(p => typeof p==='string' && state.polls.some(r=>isValue(r[p])));
+    PARTY_NAMES = present.length ? present : [...new Set(state.polls.flatMap(r=>Object.keys(r).filter(p=>!['date','firm','n'].includes(p))))];
+    state.selected = new Set(DEFAULT_PARTIES.filter(p=>PARTY_NAMES.includes(p)));
+    if(!state.selected.size)state.selected=new Set(PARTY_NAMES.slice(0,Math.min(6,PARTY_NAMES.length)));
+    state.boxParty = state.selected.values().next().value;
     state.updated=data.updated_utc||'';
     setup();
   }catch(err){$('sync-state').textContent='Archivio non disponibile';$('chart-title').textContent='Errore durante il caricamento';$('chart-description').textContent=`Impossibile recuperare i dati: ${err.message}. Avvia il sito da un server web (non file://).`;}

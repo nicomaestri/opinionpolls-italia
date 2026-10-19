@@ -22,7 +22,22 @@ import requests
 from bs4 import BeautifulSoup
 
 URL = "https://en.wikipedia.org/wiki/Opinion_polling_for_the_next_Italian_general_election"
+# Shown first in the interface. Additional parties are discovered from Wikipedia columns.
 PARTIES = ("FdI", "PD", "M5S", "Lega", "FI", "AVS")
+PARTY_PRIORITY = (*PARTIES, "A", "IV", "+E", "NM", "ScN", "PLD", "FN", "DSP", "PTD", "SUE", "Libertà", "AP", "Others")
+NON_PARTY_COLUMNS = {"Fieldwork date", "Polling firm", "Sample size", "Lead", "CSX", "CDX", "Parties", "Coalitions", "Polling", "Others lead"}
+
+
+def party_columns(df: pd.DataFrame) -> list[str]:
+    """Find all vote-share columns, never treating coalitions or metadata as parties."""
+    candidates = [c for c in df.columns if c not in NON_PARTY_COLUMNS and not c.startswith('Unnamed')
+                  and len(c) < 35 and not re.fullmatch(r'20\d{2}', c)]
+    return [c for c in candidates if df[c].map(numeric_share).notna().any()]
+
+
+def ordered_parties(names) -> list[str]:
+    names = set(names)
+    return [p for p in PARTY_PRIORITY if p in names] + sorted(names - set(PARTY_PRIORITY))
 MONTHS = {m.lower(): i for i, m in enumerate(("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"), start=1)}
 DATE_TOKEN = re.compile(r"(\d{1,2})\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\s+(20\d{2}))?", re.I)
 
@@ -138,11 +153,12 @@ def read_source_html(html: str) -> list[dict[str, Any]]:
             if not dfs:
                 continue
             df = normalized_columns(dfs[0])
-            expected = {"Fieldwork date", "Polling firm", "FdI", "PD", "M5S", "Lega", "FI", "AVS"}
-            if not expected.issubset(set(df.columns)):
+            expected = {"Fieldwork date", "Polling firm", "FdI", "PD", "M5S"}
+            if not expected.issubset(df.columns):
                 continue
             if df.columns.duplicated().any():
                 df = df.loc[:, ~df.columns.duplicated()]
+            vote_columns = party_columns(df)
             for _, row in df.iterrows():
                 date = parse_period(row["Fieldwork date"], year)
                 if not date:
@@ -150,14 +166,15 @@ def read_source_html(html: str) -> list[dict[str, Any]]:
                 firm = normalize_name(row["Polling firm"])
                 if not firm or firm.lower() in {"nan", "polling firm"} or any(x in firm.lower() for x in ("election", "referendum")):
                     continue
-                vals = {party: numeric_share(row[party]) for party in PARTIES}
-                if sum(v is not None for v in vals.values()) < 4:
+                vals = {party: numeric_share(row[party]) for party in vote_columns}
+                if sum(vals.get(p) is not None for p in PARTIES) < 4:
                     continue
                 n = sample_size(row.get("Sample size"))
                 polls.append({"date": date, "firm": firm, "n": n, **vals})
+    # Two different polls from the same firm and date may be distinct; dedupe by all fields.
     uniq = {}
     for row in polls:
-        key = (row["date"], row["firm"], row["n"], *[row[k] for k in PARTIES])
+        key = json.dumps(row, sort_keys=True, ensure_ascii=False)
         uniq[key] = row
     return sorted(uniq.values(), key=lambda r: (r["date"], r["firm"]))
 
@@ -198,7 +215,7 @@ def main() -> None:
         "source": URL,
         "updated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "source_label": "Wikipedia (English), Party vote",
-        "parties": list(PARTIES),
+        "parties": ordered_parties(p for row in polls for p in row if p not in {"date", "firm", "n"}),
         "polls": polls,
     }
     path.parent.mkdir(parents=True, exist_ok=True)

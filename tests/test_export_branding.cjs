@@ -1,0 +1,10 @@
+const fs = require('node:fs');
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const code = fs.readFileSync(path.join(__dirname,'../site/assets/app.js'),'utf8');
+assert.match(code,/paper_bgcolor:\s*['"]#ffffff['"]/);
+assert.match(code,/plot_bgcolor:\s*['"]#ffffff['"]/);
+assert.match(code,/github\.com\/nicomaestri\/opinionpolls-italia/);
+assert.match(code,/withChartSignature\(res\.layout\)/);
+assert.match(code,/annotations:\s*\[\.\.\.\(layout\.annotations\|\|\[\]\),signature\]/);
+console.log('OK white plot backgrounds and GitHub signature');
