@@ -14,6 +14,8 @@ assert.match(code,/function exportHeading\(\)/);
 assert.match(code,/modeBarButtonsToRemove:\s*\[['"]toImage['"]/);
 assert.match(code,/layout\.yaxis=\{\.\.\.axes,type:'category',autorange:'reversed',showgrid:false,tickfont:/);
 assert.doesNotMatch(code,/scaleanchor:\s*['"]x['"]/);
+assert.match(code,/layout\.height\s*=\s*layout\.height\s*\|\|\s*\(mobile\s*\?\s*515\s*:\s*460\)/, 'explicit chart height prevents stale Plotly sizing after OLS charts');
+assert.match(code,/layout\.autosize\s*=\s*true/, 'Plotly must recalculate width on tab changes');
 assert.match(css,/\.plot-wrap\.corr-scroll/);
 assert.match(css,/@media\(max-width:680px\)/);
 console.log('OK white PNG export, title, mode, GitHub signature, rectangular heatmap and mobile scrolling');

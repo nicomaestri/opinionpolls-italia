@@ -378,8 +378,12 @@ function render(){
     layout.height=state.tab==='corr'?Math.max(460,120+selectedParties().length*49):res.layout.height;
     layout.margin={...layout.margin,l:state.tab==='corr'?65:150,r:83,b:88};
   }
-  // Let the containing card grow with long institute rankings and heatmaps.
-  $('chart').style.height=`${layout.height || (mobile?515:460)}px`;
+  // Plotly.react retains an old explicit layout.height when subsequent layouts omit it.
+  // Always provide the new height, especially after switching from tall OLS rankings
+  // back to CV, trends, confidence intervals or boxplots.
+  layout.height = layout.height || (mobile ? 515 : 460);
+  layout.autosize = true;
+  $('chart').style.height=`${layout.height}px`;
   lastRender={traces:res.traces,layout, title, desc};
   if(typeof Plotly!=='undefined')Plotly.react('chart',res.traces,withChartSignature(layout),config);
   else $('empty-state').textContent='Impossibile caricare Plotly. Controlla la connessione a Internet e riprova.';
