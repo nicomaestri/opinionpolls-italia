@@ -84,3 +84,21 @@
 .notes-grid-extended{margin-top:24px;grid-template-columns:1fr}
 .notes-grid-extended article{max-width:900px}
 @media(max-width:680px){.coalition-builder{margin:0 16px 17px;padding:12px;gap:9px}.coalition-copy{flex-basis:100%}.coalition-input-label{width:100%;justify-content:space-between}.coalition-input-label input{flex:1;min-width:0;max-width:none}.coalition-toggle{width:100%}.chart-insight{margin:12px 16px 0;padding:9px 11px;font-size:11px}}
+
+
+/* v8: coalition dropdown next to chart tools */
+.coalition-dropdown{position:relative;min-width:220px}
+.coalition-dropdown summary{list-style:none;cursor:pointer;border:1px solid #dce3eb;background:#fff;border-radius:7px;padding:9px 12px;color:var(--ink);font:600 12px 'DM Sans',sans-serif;min-height:39px;display:flex;align-items:center;justify-content:space-between}
+.coalition-dropdown summary::-webkit-details-marker{display:none}
+.coalition-dropdown summary::after{content:'▾';font-size:11px;color:#7b8aa1;margin-left:10px}
+.coalition-dropdown[open] summary{border-color:#bfcde5;box-shadow:0 4px 16px #1e345512}
+.coalition-dropdown-panel{position:absolute;right:0;top:calc(100% + 8px);z-index:20;width:min(360px,88vw);background:#fff;border:1px solid #dce3eb;border-radius:10px;box-shadow:0 10px 30px #1f35531a;padding:12px}
+.coalition-note{font-size:11px;line-height:1.45;color:#71849c;margin-bottom:10px}
+.coalition-name-inline{display:flex;flex-direction:column;gap:6px;font-size:11px;font-weight:700;color:#677891;margin-bottom:10px}
+.coalition-name-inline input{height:36px;padding:0 10px;border:1px solid #d5e0f0;border-radius:7px;font:600 12px 'DM Sans',sans-serif;color:#263a56;background:white}
+.coalition-checklist{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;max-height:220px;overflow:auto;padding-right:2px}
+.coalition-check{display:flex;align-items:center;gap:8px;font-size:12px;color:#304764;background:#f8fbff;border:1px solid #e7edf7;border-radius:8px;padding:7px 8px}
+.coalition-check input{margin:0}.coalition-check .swatch{width:10px;height:10px;border-radius:2px;display:inline-block}
+.coalition-actions{display:flex;flex-direction:column;gap:9px;margin-top:12px}
+.coalition-status{font-size:11px;color:#71849c;line-height:1.45}
+@media(max-width:680px){.coalition-dropdown{width:100%}.coalition-dropdown summary{width:100%}.coalition-dropdown-panel{left:0;right:auto;width:100%}.coalition-checklist{grid-template-columns:1fr}}
