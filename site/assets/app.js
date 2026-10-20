@@ -2,7 +2,7 @@
 
 const DEFAULT_PARTIES = ['FdI', 'PD', 'M5S', 'Lega', 'FI', 'AVS'];
 let PARTY_NAMES = [...DEFAULT_PARTIES];
-const COLORS = {FdI:'#436ad9', PD:'#d34f60', M5S:'#ce9c24', Lega:'#349a74', FI:'#5e9cc9', AVS:'#9873c8', A:'#be754a', IV:'#8c62b1', '+E':'#e58a5a', NM:'#657f97', ScN:'#488a8c', PLD:'#b86c8d', FN:'#5d526f', DSP:'#8b8d39', Others:'#85909c'};
+const COLORS = {CSX:'#c55269',CDX:'#386eb3',FdI:'#436ad9', PD:'#d34f60', M5S:'#ce9c24', Lega:'#349a74', FI:'#5e9cc9', AVS:'#9873c8', A:'#be754a', IV:'#8c62b1', '+E':'#e58a5a', NM:'#657f97', ScN:'#488a8c', PLD:'#b86c8d', FN:'#5d526f', DSP:'#8b8d39', Others:'#85909c'};
 const COALITION_KEY = '__custom_coalition__';
 const COALITION_COLOR = '#245a87';
 const EXTRA_COLORS = ['#3b8f83','#b97463','#789bc4','#bd698c','#8e82ac','#b09342'];
@@ -12,7 +12,7 @@ function colorOf(party) {
   let hash=0;for(const ch of party)hash=((hash*33)+ch.codePointAt(0))>>>0;
   return EXTRA_COLORS[hash%EXTRA_COLORS.length];
 }
-const state = {polls:[], selected:new Set(DEFAULT_PARTIES), tab:'super', span:0.30, from:'', to:'', boxParty:'FdI', scale:'share', corrMode:'changes',cvView:'cv',houseView:'ranking',houseParty:'FdI',coalitionMode:false,coalitionName:'Coalizione personalizzata',coalitionMembers:new Set(['FdI','Lega','FI'])};
+const state = {polls:[], selected:new Set(DEFAULT_PARTIES), tab:'super', span:0.30, from:'', to:'', boxParty:'FdI', scale:'share', corrMode:'changes',cvView:'cv',houseView:'ranking',houseParty:'FdI',coalitionMode:false,coalitionName:'Coalizione personalizzata',coalitionMembers:new Set(['FdI','Lega','FI']),reportedMode:false,coalitionPolls:[],coalitionScenario:''};
 const $ = id => document.getElementById(id);
 const dateUTC = date => new Date(`${date}T12:00:00Z`);
 const toISO = date => date.toISOString().slice(0,10);
@@ -34,9 +34,13 @@ function filtered() {return state.polls.filter(inWindow);}
 function selectedParties() {return PARTY_NAMES.filter(p=>state.selected.has(p));}
 function coalitionMembers() { return PARTY_NAMES.filter(p=>state.coalitionMembers.has(p)); }
 function coalitionActive() { return state.coalitionMode && coalitionMembers().length >= 2; }
-function chartParties() { return coalitionActive() ? [COALITION_KEY] : selectedParties(); }
+function reportedActive() { return state.reportedMode && !!state.coalitionScenario; }
+function chartParties() { return reportedActive() ? ['CSX','CDX'] : coalitionActive() ? [COALITION_KEY] : selectedParties(); }
+function reportedRows(rows){return rows.filter(r=>r.scenario===state.coalitionScenario);}
+function displayedRows(rows){return reportedActive()?reportedRows(state.coalitionPolls).filter(inWindow):coalitionActive()?chartRows(rows):rows;}
 function partyLabel(party) {
-  return party === COALITION_KEY ? (state.coalitionName || 'Coalizione personalizzata') : party;
+  if(party===COALITION_KEY) return state.coalitionName || 'Coalizione personalizzata';
+  return party==='CSX'?'Centro-sinistra (rilevato)':party==='CDX'?'Centrodestra (rilevato)':party;
 }
 // A missing party estimate is NOT a zero vote share. The coalition observation
 // is defined only when all its components were published in the SAME poll.
@@ -193,12 +197,16 @@ function supermediaSnapshot(rows, parties, span=state.span) {
     if(weekly.length<3)continue;
     const latest=weekly.at(-1);
     if((dateUTC(anchor)-dateUTC(latest.date))/86400000>14)continue; // stale series
-    const current=lowess(weekly.map(v=>({date:v.date,y:v.mean})),span).at(-1);
-    const historical=weekly.filter(v=>v.date<=cutoff);
+    // Both current and historical bars are points of the SAME full-archive LOWESS.
+    const fitted=lowess(weekly.map(v=>({date:v.date,y:v.mean})),span);
+    const current=fitted.at(-1);
+    const target=dateUTC(cutoff).getTime();
     let previous=null, previousDate=null;
-    if(historical.length>=3 && (dateUTC(cutoff)-dateUTC(historical.at(-1).date))/86400000<=30){
-      previous=lowess(historical.map(v=>({date:v.date,y:v.mean})),span).at(-1);
-      previousDate=historical.at(-1).date;
+    const candidates=weekly.map((v,i)=>({index:i,distance:Math.abs(dateUTC(v.date).getTime()-target)/86400000}));
+    candidates.sort((a,b)=>a.distance-b.distance);
+    if(candidates[0]?.distance<=28){
+      previous=fitted[candidates[0].index];
+      previousDate=weekly[candidates[0].index].date;
     }
     items.push({party,label:partyLabel(party),current,previous,latest:latest.date,previousDate});
   }
@@ -206,35 +214,45 @@ function supermediaSnapshot(rows, parties, span=state.span) {
   return {anchor,comparison:cutoff,items};
 }
 function renderSupermedia(rows) {
-  const sourceRows = coalitionActive() ? chartRows(state.polls) : state.polls;
+  // The supermedia always uses the complete archive; the global date window is irrelevant.
+  const sourceRows=reportedActive()?reportedRows(state.coalitionPolls):coalitionActive()?chartRows(state.polls):state.polls;
   const {anchor,comparison,items}=supermediaSnapshot(sourceRows,chartParties());
-  if(!items.length)return {traces:[],layout:layoutBase(),description:'Non ci sono almeno tre settimane valide di rilevazioni recenti per i partiti selezionati.'};
-  const labels=items.map(d=>d.label), colors=items.map(d=>colorOf(d.party));
-  const previous={type:'bar',name:'LOWESS circa un anno prima',x:labels,y:items.map(d=>d.previous),
-    width:.78,marker:{color:colors.map(c=>c+'55'),line:{color:colors.map(c=>c+'88'),width:1}},
-    hovertemplate:'%{x}<br>LOWESS circa un anno prima: %{y:.2f}%<extra></extra>',showlegend:false};
-  const current={type:'bar',name:'Ultima supermedia LOWESS',x:labels,y:items.map(d=>d.current),
-    width:.56,marker:{color:colors,line:{color:'#ffffff',width:.7}},
-    text:items.map(d=>`${d.current.toFixed(1)}%`),textposition:'outside',textfont:{size:14,color:'#263b5b'},cliponaxis:false,
-    customdata:items.map(d=>[d.latest,d.previous,d.previousDate||'n.d.']),
-    hovertemplate:'%{x}<br>Ultima supermedia: %{y:.2f}%<br>Settimana finale: %{customdata[0]}<br>Confronto storico: %{customdata[2]}<extra></extra>',showlegend:false};
+  if(!items.length){
+    const message=reportedActive()
+      ? 'Per questo scenario Wikipedia non ci sono abbastanza rilevazioni recenti per una LOWESS attendibile. Puoi consultare i singoli sondaggi nelle sezioni Serie storiche e IC.'
+      : 'Nessuna serie con almeno tre settimane recenti di dati disponibili per la supermedia.';
+    return {traces:[],layout:layoutBase(),description:message};
+  }
+  const xs=items.map((_,i)=>i);
+  const colors=items.map(d=>colorOf(d.party));
+  // The historical bar is painted first. The current bar partly overlaps it;
+  // the pale bar remains visible slightly to the RIGHT, as in the reference.
+  const previous={type:'bar',name:'LOWESS un anno prima',x:xs,y:items.map(d=>d.previous),
+    width:.48,offset:.035,marker:{color:colors.map(c=>lightenHex(c,.64)),line:{width:0}},
+    text:items.map(d=>d.previous===null?'':`${d.previous.toFixed(1)}%`),textposition:'outside',
+    textfont:{size:12,color:colors.map(c=>lightenHex(c,.24))},cliponaxis:false,
+    customdata:items.map(d=>[d.label,d.previousDate||'n.d.']),
+    hovertemplate:'%{customdata[0]}<br>LOWESS un anno prima: %{y:.2f}%<br>Settimana: %{customdata[1]}<extra></extra>',showlegend:false};
+  const current={type:'bar',name:'Ultima supermedia LOWESS',x:xs,y:items.map(d=>d.current),
+    width:.64,offset:-.35,marker:{color:colors,line:{width:0}},
+    text:items.map(d=>`${d.current.toFixed(1)}%`),textposition:'outside',
+    textfont:{size:14,color:'#29405c'},cliponaxis:false,
+    customdata:items.map(d=>[d.label,d.latest]),
+    hovertemplate:'%{customdata[0]}<br>Ultima LOWESS: %{y:.2f}%<br>Settimana: %{customdata[1]}<extra></extra>',showlegend:false};
   const layout=layoutBase();
-  layout.barmode='overlay'; layout.bargap=.24;
-  layout.margin={l:68,r:30,t:120,b:117};
-  layout.showlegend=false;
-  layout.xaxis={...axes,type:'category',showgrid:false,tickfont:{size:12,color:'#41536d'}};
-  layout.yaxis={...axes,title:'Intenzioni di voto (%)',ticksuffix:'%',rangemode:'tozero',range:[0,Math.max(5,...items.map(d=>d.current),...items.map(d=>d.previous||0))*1.22]};
-  layout.annotations=[
-    {xref:'paper',yref:'paper',x:0,y:1.08,showarrow:false,xanchor:'left',yanchor:'bottom',align:'left',
-      text:'<b>Barra piena</b>: ultima supermedia LOWESS disponibile · <b>barra chiara</b>: stessa LOWESS circa un anno prima',
-      font:{family:'DM Sans,Arial,sans-serif',size:12,color:'#60738f'}},
-    {xref:'paper',yref:'paper',x:0,y:1.035,showarrow:false,xanchor:'left',yanchor:'bottom',align:'left',
-      text:'La supermedia usa sempre l’intero archivio disponibile e non cambia se modifichi il filtro temporale delle altre sezioni.',
-      font:{family:'DM Sans,Arial,sans-serif',size:11,color:'#8a97aa'}}
-  ];
-  const lacking=items.filter(i=>i.previous===null).length;
-  const msg=`${items.length} ${coalitionActive()?'coalizione':'partiti'} · ultimo riferimento settimanale ${anchor}; confronto storico attorno al ${comparison}. Se manca una barra chiara, non ci sono dati sufficientemente vicini a un anno prima.${lacking?` Confronto non disponibile per ${lacking} voci.`:''}`;
-  return {traces:[previous,current],layout,description:msg};
+  layout.barmode='overlay';layout.bargap=.18;
+  layout.margin={l:58,r:22,t:28,b:94};layout.showlegend=false;
+  layout.xaxis={...axes,type:'linear',showgrid:false,tickmode:'array',tickvals:xs,ticktext:items.map(d=>d.label),tickfont:{size:12,color:'#41536d'},range:[-.62,items.length-.38]};
+  layout.yaxis={...axes,title:'Intenzioni di voto (%)',ticksuffix:'%',range:[0,Math.max(5,...items.map(d=>d.current),...items.map(d=>d.previous??0))*1.23]};
+  const lacking=items.filter(d=>d.previous===null).length;
+  const desc=reportedActive()?`Scenario pubblicato: ${state.coalitionScenario}. NON confrontare sondaggi con scenari diversi. `:'';
+  return {traces:[previous,current],layout,description:
+    `${desc}${items.length} serie · ultimo riferimento ${anchor}; confronto con LOWESS vicina al ${comparison}. ${lacking?`${lacking} serie senza dati confrontabili un anno prima. `:''}La supermedia usa sempre l'intero archivio.`};
+}
+
+function lightenHex(hex, weight){
+  const digits=hex.match(/^#([a-fA-F0-9]{6})$/)?.[1];if(!digits)return '#bfcde6';
+  return '#'+[0,2,4].map(i=>Math.round(parseInt(digits.slice(i,i+2),16)*(1-weight)+255*weight).toString(16).padStart(2,'0')).join('');
 }
 
 function renderCV(rows) {
@@ -400,47 +418,83 @@ const tabMetadata={
 
 
 function buildCoalitionMenu(){
-  const details=document.createElement('details');
-  details.className='coalition-dropdown';
+  const details=document.createElement('details'); details.className='coalition-dropdown';
   const summary=document.createElement('summary');
-  summary.textContent=coalitionActive()?`Coalizione: ${state.coalitionName}`:'Coalizione personalizzata';
+  summary.textContent=reportedActive()?'Coalizioni rilevate · Wikipedia':coalitionActive()?`Coalizione: ${state.coalitionName}`:'Crea o confronta coalizioni';
   details.append(summary);
-  const panel=document.createElement('div');
-  panel.className='coalition-dropdown-panel';
-  const note=document.createElement('div');
-  note.className='coalition-note';
-  note.textContent='Seleziona i partiti da sommare nello stesso sondaggio. I sondaggi con componenti mancanti vengono esclusi.';
+  const panel=document.createElement('div');panel.className='coalition-dropdown-panel';
+  panel.addEventListener('click',e=>e.stopPropagation());
+  const note=document.createElement('p');note.className='coalition-note';
+  note.textContent='Simula liberamente una coalizione o consulta CSX/CDX pubblicati su Wikipedia. Il menu resta aperto durante la selezione.';
   panel.append(note);
-  const nameLabel=document.createElement('label');
-  nameLabel.className='coalition-name-inline';
-  nameLabel.textContent='Nome coalizione';
-  const input=document.createElement('input');
-  input.type='text'; input.maxLength=48; input.value=state.coalitionName; input.setAttribute('aria-label','Nome della coalizione');
-  input.addEventListener('input',e=>{state.coalitionName=e.target.value.replace(/[<>]/g,'').slice(0,48).trim()||'Coalizione personalizzata';render();});
-  nameLabel.append(input); panel.append(nameLabel);
-  const list=document.createElement('div'); list.className='coalition-checklist';
+  const section=document.createElement('div');section.className='coalition-mode-options';
+  const modeSelect=document.createElement('select');modeSelect.setAttribute('aria-label','Fonte della coalizione');
+  for(const [value,label] of [['custom','Simula una coalizione'],['reported','Coalizioni e aggregati · Wikipedia']]){
+    const option=document.createElement('option');option.value=value;option.textContent=label;
+    if(value===(reportedActive()?'reported':'custom'))option.selected=true;
+    modeSelect.append(option);
+  }
+  section.append(modeSelect);panel.append(section);
+  const custom=document.createElement('div');custom.className='coalition-custom';
+  const nameLabel=document.createElement('label');nameLabel.className='coalition-name-inline';nameLabel.textContent='Nome coalizione';
+  const input=document.createElement('input');input.type='text';input.maxLength=48;input.value=state.coalitionName;
+  input.setAttribute('aria-label','Nome della coalizione');nameLabel.append(input);custom.append(nameLabel);
+  const presets=document.createElement('div');presets.className='coalition-presets';
+  const draft=new Set(state.coalitionMembers);
+  const boxes=new Map();
+  const status=document.createElement('p');status.className='coalition-status';
+  function refreshDraft(){
+    boxes.forEach((box,party)=>box.checked=draft.has(party));
+    status.textContent=draft.size>=2?`${draft.size} partiti: ${PARTY_NAMES.filter(p=>draft.has(p)).join(' + ')}`:'Seleziona almeno due partiti.';
+    apply.disabled=modeSelect.value==='custom'&&draft.size<2;
+  }
+  function addPreset(label,parties){
+    const b=document.createElement('button');b.type='button';b.textContent=label;b.className='coalition-preset';
+    b.addEventListener('click',()=>{draft.clear();parties.filter(p=>PARTY_NAMES.includes(p)).forEach(p=>draft.add(p));refreshDraft();});
+    presets.append(b);
+  }
+  addPreset('Centrodestra', ['FdI','Lega','FI','NM']);
+  addPreset('Centrosinistra', ['PD','M5S','AVS','IV','+E']);
+  custom.append(presets);
+  const list=document.createElement('div');list.className='coalition-checklist';
   PARTY_NAMES.forEach(party=>{
-    const item=document.createElement('label'); item.className='coalition-check';
-    const box=document.createElement('input'); box.type='checkbox'; box.checked=state.coalitionMembers.has(party);
-    box.addEventListener('change',()=>{
-      if(box.checked) state.coalitionMembers.add(party); else state.coalitionMembers.delete(party);
-      if(state.coalitionMode && coalitionMembers().length<2) state.coalitionMode=false;
-      render();
-    });
-    const swatch=document.createElement('span'); swatch.className='swatch'; swatch.style.background=colorOf(party);
-    const txt=document.createElement('span'); txt.textContent=party;
-    item.append(box,swatch,txt); list.append(item);
+    const item=document.createElement('label');item.className='coalition-check';
+    const box=document.createElement('input');box.type='checkbox';box.checked=draft.has(party);boxes.set(party,box);
+    box.addEventListener('change',()=>{if(box.checked)draft.add(party);else draft.delete(party);refreshDraft();});
+    const swatch=document.createElement('span');swatch.className='swatch';swatch.style.background=colorOf(party);
+    const txt=document.createElement('span');txt.textContent=party;item.append(box,swatch,txt);list.append(item);
+  });custom.append(list);custom.append(status);panel.append(custom);
+  const reported=document.createElement('div');reported.className='coalition-reported';
+  const scenarioLabel=document.createElement('label');scenarioLabel.className='coalition-name-inline';scenarioLabel.textContent='Scenario di rilevazione';
+  const scenarioSelect=document.createElement('select');scenarioSelect.setAttribute('aria-label','Scenario di coalizione pubblicato');
+  const scenarios=[...new Set(state.coalitionPolls.map(r=>r.scenario))];
+  scenarios.sort((a,b)=>(a.startsWith('Aggregati')?-1:0)-(b.startsWith('Aggregati')?-1:0));
+  if(!scenarios.length){const o=document.createElement('option');o.value='';o.textContent='Nessuno scenario caricato (attendi aggiornamento dati)';scenarioSelect.append(o);}
+  else for(const sc of scenarios){const o=document.createElement('option');o.value=sc;o.textContent=sc;if(sc===state.coalitionScenario)o.selected=true;scenarioSelect.append(o);}
+  scenarioLabel.append(scenarioSelect);reported.append(scenarioLabel);
+  const reportNote=document.createElement('p');reportNote.className='coalition-note';
+  reportNote.textContent='Gli aggregati CSX/CDX della tabella Party vote sono distinti dai sondaggi diretti su coalizioni ipotetiche. Seleziona lo scenario appropriato: non combiniamo mai scenari diversi.';
+  reported.append(reportNote);panel.append(reported);
+  const footer=document.createElement('div');footer.className='coalition-actions';
+  const cancel=document.createElement('button');cancel.type='button';cancel.className='coalition-secondary';cancel.textContent='Mostra i partiti singoli';
+  cancel.addEventListener('click',()=>{state.coalitionMode=false;state.reportedMode=false;details.open=false;render();});
+  const apply=document.createElement('button');apply.type='button';apply.className='coalition-toggle';apply.textContent='Applica coalizione';
+  apply.addEventListener('click',()=>{
+    if(modeSelect.value==='reported'){
+      if(!scenarioSelect.value)return;
+      state.coalitionScenario=scenarioSelect.value;state.reportedMode=true;state.coalitionMode=false;
+    }else{
+      if(draft.size<2)return;
+      state.coalitionMembers=new Set(draft);state.coalitionName=input.value.replace(/[<>]/g,'').trim().slice(0,48)||'Coalizione personalizzata';
+      state.coalitionMode=true;state.reportedMode=false;
+    }
+    details.open=false;render();
   });
-  panel.append(list);
-  const footer=document.createElement('div'); footer.className='coalition-actions';
-  const status=document.createElement('div'); status.className='coalition-status';
-  status.textContent=coalitionMembers().length>=2 ? `Partiti selezionati: ${coalitionMembers().join(' + ')}` : 'Seleziona almeno due partiti per creare una coalizione.';
-  const btn=document.createElement('button'); btn.type='button'; btn.className='coalition-toggle';
-  btn.textContent=coalitionActive() ? 'Mostra partiti singoli' : 'Mostra coalizione';
-  btn.disabled=coalitionMembers().length<2;
-  btn.addEventListener('click',()=>{ if(coalitionMembers().length<2) return; state.coalitionMode=!state.coalitionMode; render(); });
-  footer.append(status,btn); panel.append(footer);
-  details.append(panel);
+  footer.append(cancel,apply);panel.append(footer);details.append(panel);
+  function refreshMode(){const r=modeSelect.value==='reported';custom.hidden=r;reported.hidden=!r;apply.disabled=r?!scenarioSelect.value:draft.size<2;}
+  modeSelect.addEventListener('change',refreshMode);
+  scenarioSelect.addEventListener('change',refreshMode);
+  refreshDraft();refreshMode();
   return details;
 }
 
@@ -451,6 +505,7 @@ function render(){
   $('chart-tools').innerHTML='';
   const supportsCoalition=['trend','ci','super'].includes(state.tab);
   const insight=$('chart-insight'); insight.hidden=state.tab!=='cv';
+  const superCaption=$('super-caption');superCaption.hidden=state.tab!=='super';
   if(state.tab==='cv'){
     insight.innerHTML=state.cvView==='house'
       ? '<strong>Come leggere gli house effects:</strong> rosso = un istituto rileva sistematicamente il partito più in alto degli altri, blu = più in basso, controllando per la settimana. Non misura un errore rispetto al voto «vero».'
@@ -498,8 +553,8 @@ function render(){
     $('chart-tools').append(buildCoalitionMenu());
   }
   const rows=filtered();
-  const chartData=supportsCoalition?chartRows(rows):rows;
-  const superRows = coalitionActive() ? chartRows(state.polls) : state.polls;
+  const chartData=supportsCoalition?displayedRows(rows):rows;
+  const superRows=reportedActive()?reportedRows(state.coalitionPolls):state.polls;
   const res=state.tab==='trend'?renderTrend(chartData):state.tab==='ci'?renderCI(chartData):state.tab==='super'?renderSupermedia(superRows):state.tab==='cv'?(state.cvView==='house'?renderHouseEffects(rows):renderCV(rows)):state.tab==='box'?renderBox(rows):renderCorrelations(rows);
   $('chart-summary').textContent=res.description;
   $('empty-state').hidden=res.traces.length>0;
@@ -515,7 +570,7 @@ function render(){
   const mobile=window.matchMedia('(max-width:680px)').matches;
   const layout = {...res.layout};
   if(mobile && !(state.tab==='corr'||(state.tab==='cv'&&state.cvView==='house'&&state.houseView==='matrix'))) {
-    layout.margin={...layout.margin,l:47,r:18,t:state.tab==='super'?108:108,b:state.tab==='box'?145:98};
+    layout.margin={...layout.margin,l:47,r:18,t:state.tab==='super'?28:108,b:state.tab==='box'?145:98};
     layout.legend={...layout.legend,font:{size:10},y:1.07};
     layout.height=state.tab==='cv'&&state.cvView==='house'?Math.max(515,res.layout.height):515;
     if(state.tab==='cv'&&state.cvView==='house')layout.margin.l=112;
@@ -542,7 +597,7 @@ function escapeMarkup(value) {
   return String(value).replace(/[&<>]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]));
 }
 function exportHeading() {
-  if(state.tab==='super') return 'Ultima LOWESS disponibile · confronto con circa un anno prima';
+  if(state.tab==='super') return 'Ultima LOWESS disponibile · confronto storico su circa un anno';
   if(state.tab==='corr') return state.corrMode==='changes'
     ? 'Pearson r · variazioni settimanali delle curve LOWESS'
     : 'Pearson r · livelli delle curve LOWESS';
@@ -561,11 +616,12 @@ function liveVisibleTraces() {
   }).map(t=>JSON.parse(JSON.stringify(t)));
 }
 function exportSeriesLabels(traces) {
+  if(reportedActive() && ['trend','ci','super'].includes(state.tab))return ['Centro-sinistra (rilevato)','Centrodestra (rilevato)'];
   if(coalitionActive() && ['trend','ci','super'].includes(state.tab))return [partyLabel(COALITION_KEY)];
   if(!['trend','ci','cv','super'].includes(state.tab) || (state.tab==='cv'&&state.cvView==='house'))return [];
   if(state.tab==='super')return chartParties().map(partyLabel);
   const present=new Set(traces.map(t=>t.legendgroup).filter(Boolean));
-  return PARTY_NAMES.filter(p=>present.has(p));
+  return chartParties().filter(p=>present.has(p)).map(partyLabel);
 }
 function exportTracesForPng() {
   const traces=liveVisibleTraces();
@@ -576,7 +632,7 @@ function exportTracesForPng() {
     for(const t of traces){
       t.name=partyLabel(t.legendgroup);
       t.showlegend=t.mode==='lines';
-      t.legendrank=Math.max(1,labels.indexOf(t.legendgroup)+1);
+      t.legendrank=Math.max(1,labels.indexOf(partyLabel(t.legendgroup))+1);
     }
   }
   if(state.tab==='super'){
@@ -593,7 +649,7 @@ function exportLayoutForPng(traces=lastRender.traces) {
   const title=sole?`${lastRender.title} – ${labels[0]}`:lastRender.title;
   const needsLegend=['trend','ci','cv'].includes(state.tab) && !(state.tab==='cv'&&state.cvView==='house');
   const legendRows=needsLegend?Math.max(1,Math.ceil(labels.length/9)):1;
-  const top=needsLegend?205+Math.max(0,legendRows-1)*26:160;
+  const top=state.tab==='super'?121:(needsLegend?205+Math.max(0,legendRows-1)*26:160);
   l.margin={...l.margin,l:state.tab==='corr'?135:(state.tab==='cv'&&state.cvView==='house'?200:85),r:state.tab==='corr'?150:65,t:top,b:state.tab==='box'?175:112};
   if(state.tab==='corr'||(state.tab==='cv'&&state.cvView==='house'&&state.houseView==='matrix')) {
     l.xaxis.tickfont={size:15,color:'#354963'};
@@ -613,8 +669,8 @@ function exportLayoutForPng(traces=lastRender.traces) {
   ];
   if(state.tab==='super'){
     l.annotations.push(
-      {xref:'paper',yref:'paper',x:0,y:1,xanchor:'left',yanchor:'bottom',yshift:top-126,showarrow:false,
-       font:{family:'Arial,sans-serif',size:13,color:'#6e7f9a'},text:'Barra piena: ultima supermedia LOWESS · barra chiara: stessa LOWESS circa un anno prima'}
+      {xref:'paper',yref:'paper',x:0,y:0,xanchor:'left',yanchor:'top',yshift:-44,showarrow:false,
+       font:{family:'Arial,sans-serif',size:13,color:'#6e7f9a'},text:'Barra piena: ultima LOWESS · barra chiara a destra: LOWESS circa un anno prima'}
     );
   }
   return withChartSignature(l);
@@ -671,7 +727,7 @@ function setup(){
     render();
   }));
   $('reset-filters').addEventListener('click',()=>{
-    state.from=earliest;state.to=latest;state.span=.30;state.scale='share';state.corrMode='changes';state.cvView='cv';state.houseView='ranking';state.houseParty='FdI';state.selected=new Set(DEFAULT_PARTIES.filter(p=>PARTY_NAMES.includes(p)));state.coalitionMode=false;state.coalitionName='Coalizione personalizzata';state.coalitionMembers=new Set(Array.from(state.selected).slice(0,Math.min(3,state.selected.size))); 
+    state.from=earliest;state.to=latest;state.span=.30;state.scale='share';state.corrMode='changes';state.cvView='cv';state.houseView='ranking';state.houseParty='FdI';state.selected=new Set(DEFAULT_PARTIES.filter(p=>PARTY_NAMES.includes(p)));state.coalitionMode=false;state.reportedMode=false;state.coalitionName='Coalizione personalizzata';state.coalitionMembers=new Set(Array.from(state.selected).slice(0,Math.min(3,state.selected.size))); 
     $('date-from').value=earliest;$('date-to').value=latest;$('lowess-span').value=30;$('span-label').textContent='30%';updatePartyFilters();render();
   });
   $('export-chart').addEventListener('click', exportChartPng);
@@ -689,6 +745,8 @@ async function init(){
     if(!response.ok)throw new Error(`HTTP ${response.status}`);
     const data=await response.json();
     state.polls=(data.polls||[]).filter(p=>/^20\d\d-\d\d-\d\d$/.test(p.date)&&p.firm);
+    state.coalitionPolls=(data.coalition_polls||[]).filter(p=>/^20\d\d-\d\d-\d\d$/.test(p.date)&&p.firm&&p.scenario&&isValue(p.CSX)&&isValue(p.CDX));
+    state.coalitionScenario=state.coalitionPolls[0]?.scenario||'';
     if(!state.polls.length)throw new Error('Archivio vuoto');
     const present = (data.parties || []).filter(p => typeof p==='string' && state.polls.some(r=>isValue(r[p])));
     PARTY_NAMES = present.length ? present : [...new Set(state.polls.flatMap(r=>Object.keys(r).filter(p=>!['date','firm','n'].includes(p))))];

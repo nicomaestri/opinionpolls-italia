@@ -179,6 +179,119 @@ def read_source_html(html: str) -> list[dict[str, Any]]:
     return sorted(uniq.values(), key=lambda r: (r["date"], r["firm"]))
 
 
+
+
+def read_coalition_party_vote_html(html: str) -> list[dict[str, Any]]:
+    """Read the CSX/CDX columns attached to ordinary party-vote polls.
+
+    Those coalition aggregates are not necessarily separate coalition-vote
+    questions. Keep them explicitly labelled apart from hypothetical polls.
+    """
+    soup = BeautifulSoup(html, "lxml")
+    in_party_vote = False
+    year: int | None = None
+    items: list[dict[str, Any]] = []
+    for tag in soup.find_all(["h2", "h3", "h4", "h5", "table"]):
+        if tag.name == "h2":
+            heading = (tag.get("id") or tag.get_text(" ", strip=True)).lower().replace(" ", "_")
+            if "party_vote" in heading:
+                in_party_vote, year = True, None
+            elif in_party_vote:
+                break
+        elif tag.name != "table":
+            heading = tag.get_text(" ", strip=True)
+            if in_party_vote and re.fullmatch(r"20\d{2}", heading):
+                year = int(heading)
+        elif in_party_vote and year is not None and "wikitable" in tag.get("class", []):
+            try:
+                parsed = pd.read_html(StringIO(str(tag)), flavor="lxml")
+            except (ValueError, ImportError):
+                continue
+            if not parsed:
+                continue
+            df = normalized_columns(parsed[0]);df=df.loc[:,~df.columns.duplicated()]
+            if not {"Fieldwork date","Polling firm","CSX","CDX"}.issubset(df.columns):
+                continue
+            for _, row in df.iterrows():
+                date = parse_period(row["Fieldwork date"],year)
+                firm = normalize_name(row["Polling firm"])
+                csx,cdx = numeric_share(row["CSX"]),numeric_share(row["CDX"])
+                if not date or not firm or csx is None or cdx is None:
+                    continue
+                items.append({"date":date,"firm":firm,"n":sample_size(row.get("Sample size")),
+                              "scenario":"Aggregati CSX/CDX (tabella Party vote)","kind":"aggregate","CSX":csx,"CDX":cdx})
+    return items
+
+
+def read_coalition_source_html(html: str) -> list[dict[str, Any]]:
+    """Read *direct coalition polls*, preserving the questionnaire scenario.
+
+    The hypothetical-polls section on Wikipedia includes several competing
+    definitions of CSX/CDX. These are not interchangeable and should never be
+    pooled together without conditioning on the precise scenario.
+    """
+    soup = BeautifulSoup(html, "lxml")
+    in_section = False
+    section_level = 0
+    scenario = None
+    results: list[dict[str, Any]] = []
+    for tag in soup.find_all(["h2", "h3", "h4", "h5", "h6", "table"]):
+        if tag.name != "table":
+            text = tag.get_text(" ", strip=True).replace("[ edit ]", "").strip()
+            level = int(tag.name[1])
+            if "polling for coalitions" in text.lower():
+                in_section, section_level, scenario = True, level, None
+            elif in_section and level <= section_level:
+                in_section, scenario = False, None
+            elif in_section and level == section_level+1:
+                scenario = text
+            continue
+        if not in_section or not scenario or "wikitable" not in tag.get("class", []):
+            continue
+        # Do not mistakenly process 'who should join a coalition' questions.
+        if " vs. " not in scenario and " vs " not in scenario:
+            continue
+        try:
+            parsed = pd.read_html(StringIO(str(tag)), flavor="lxml")
+        except (ValueError, ImportError):
+            continue
+        if not parsed:
+            continue
+        df = normalized_columns(parsed[0])
+        if not {"Fieldwork date", "Polling firm", "CSX", "CDX"}.issubset(df.columns):
+            continue
+        if df.columns.duplicated().any():
+            df = df.loc[:, ~df.columns.duplicated()]
+        for _, row in df.iterrows():
+            raw_date = str(row["Fieldwork date"])
+            # Coalition hypotheticals may contain polls from past years.
+            year_match = re.findall(r"20\d{2}", raw_date)
+            year = int(year_match[-1]) if year_match else 2026
+            date = parse_period(row["Fieldwork date"], year)
+            if not date:
+                continue
+            firm = normalize_name(row["Polling firm"])
+            csx, cdx = numeric_share(row["CSX"]), numeric_share(row["CDX"])
+            if not firm or csx is None or cdx is None:
+                continue
+            results.append({"date": date, "firm": firm, "n": sample_size(row.get("Sample size")),
+                            "scenario": scenario, "CSX": csx, "CDX": cdx})
+    unique = {json.dumps(r,sort_keys=True,ensure_ascii=False): r for r in results}
+    return sorted(unique.values(), key=lambda r: (r["date"],r["scenario"],r["firm"]))
+
+
+def download_all() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    response = requests.get(URL, headers={"User-Agent": "ItalianPollingDashboard/1.0 (educational project; contact via repository issues)", "Accept-Language": "en"}, timeout=40)
+    response.raise_for_status()
+    polls = read_source_html(response.text)
+    if len(polls) < 20:
+        raise RuntimeError(f"Only {len(polls)} polls found; Wikipedia markup may have changed")
+    direct=read_coalition_source_html(response.text)
+    aggregated=read_coalition_party_vote_html(response.text)
+    combined=aggregated+[dict(item,kind="direct") for item in direct]
+    unique={json.dumps(r,sort_keys=True,ensure_ascii=False):r for r in combined}
+    return polls,sorted(unique.values(),key=lambda r:(r["date"],r["scenario"],r["firm"]))
+
 def download() -> list[dict[str, Any]]:
     response = requests.get(URL, headers={"User-Agent": "ItalianPollingDashboard/1.0 (educational project; contact via repository issues)", "Accept-Language": "en"}, timeout=40)
     response.raise_for_status()
@@ -195,7 +308,7 @@ def main() -> None:
     args = parser.parse_args()
     path = Path(args.output)
     try:
-        polls = download()
+        polls, coalition_polls = download_all()
     except Exception as exc:
         if not args.strict and path.exists():
             print(f"WARNING: download failed ({exc}); retaining last known data", file=sys.stderr)
@@ -208,15 +321,16 @@ def main() -> None:
         except (json.JSONDecodeError, OSError):
             pass
     # Avoid updating the timestamp and creating a git commit if data are identical.
-    if previous.get("polls") == polls:
+    if previous.get("polls") == polls and previous.get("coalition_polls",[]) == coalition_polls:
         print(f"No new results ({len(polls)} polls)")
         return
     payload = {
         "source": URL,
         "updated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "source_label": "Wikipedia (English), Party vote",
+        "source_label": "Wikipedia (English), Party vote e sondaggi per coalizioni",
         "parties": ordered_parties(p for row in polls for p in row if p not in {"date", "firm", "n"}),
         "polls": polls,
+        "coalition_polls": coalition_polls,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")

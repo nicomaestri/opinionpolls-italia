@@ -214,3 +214,54 @@ consenso.
 
 Test automatici aggiuntivi: `node tests/coalition_snapshot.test.cjs`, incluso
 nel test esistente `node tests/test_export_branding.cjs` del workflow GitHub.
+
+## Versione 9 — Barre sfalsate e selettore coalizioni stabile
+
+Questa versione sostituisce il comportamento delle versioni 7/8 descritto sopra:
+
+- **Ultima supermedia:** due barre verticali **parzialmente sovrapposte**, la
+  più chiara lievemente sfalsata verso destra, con etichette percentuali su
+  **entrambe** quando il confronto storico è disponibile. La spiegazione
+  visiva si trova in fondo al grafico e nel PNG. Non si inventa una barra
+  storica in assenza di rilevazioni vicine alla data di confronto.
+- La barra corrente è l'ultima LOWESS dell'archivio **completo**; quella
+  storica proviene dalla **medesima LOWESS** nel punto più vicino a 365 giorni
+  prima (tolleranza massima 28 giorni). Questo è un confronto descrittivo
+  ex post, non una previsione pubblicata un anno prima.
+- Il filtro delle date non modifica la supermedia. La scelta della percentuale
+  di ampiezza LOWESS **invece** modifica entrambe le stime perché determina
+  lo smussamento.
+- **Coalizioni simulate:** il menu a tendina a destra del grafico permette
+  la selezione di partiti tramite checkbox, un nome personalizzato e preset
+  modificabili. Le checkbox restano aperte e l'analisi si aggiorna soltanto
+  premendo **Applica coalizione**. I componenti mancanti nel medesimo
+  sondaggio continuano a causare esclusione del sondaggio, mai una quota zero.
+- **Coalizioni da Wikipedia:** il parser importa separatamente (a) gli
+  aggregati CSX/CDX nelle tabelle *Party vote* e (b) i sondaggi sulle
+  coalizioni ipotetiche nella sezione *Polling for coalitions*. Ogni
+  scenario rimane indipendente, senza unirlo a scenari diversi.
+- La modalità coalizione è disponibile solo nelle schede **Ultima
+  supermedia**, **Serie storiche** e **Intervalli di confidenza**. CV, House
+  Effects, boxplot e Correlazioni rimangono indipendenti.
+- I sondaggi su scenari ipotetici hanno spesso poche osservazioni: la
+  supermedia viene omessa se non esistono almeno tre settimane valide
+  recenti. In tal caso consultare Serie storiche o IC.
+
+### Aggiornamento GitHub
+
+Sostituire i file presenti nello ZIP di aggiornamento nei medesimi percorsi
+(`site/index.html`, `site/assets/app.js`, `site/assets/style.css`,
+`scripts/fetch_polls.py`, `tests/test_scraper.py`,
+`tests/coalition_snapshot.test.cjs` e `README.md`). Non caricare lo ZIP
+nel repository: estrarlo sul computer e caricare i singoli file. GitHub
+Actions tenterà di recuperare i nuovi dati da Wikipedia prima del deploy.
+L'archivio `site/data/polls.json` non è incluso in questo aggiornamento:
+le nuove rilevazioni per coalizioni vengono generate dalla fonte durante
+il workflow. Se Wikipedia è momentaneamente irraggiungibile, il progetto
+conserva l'ultimo snapshot e la nuova modalità di coalizioni pubblicate
+potrebbe inizialmente non disporre di dati.
+
+I test Python validano il riconoscimento di entrambe le fonti e il
+mantenimento di scenari indipendenti; i test JavaScript controllano la
+somma nel singolo sondaggio, lo sfalsamento delle barre e il calcolo
+LOWESS. Inoltre il menu è stato provato in un browser desktop e mobile.

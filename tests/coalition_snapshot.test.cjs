@@ -53,6 +53,13 @@ const originalSuper = run('renderSupermedia(testRows)');
 assert.equal(originalSuper.traces.length, 2);
 assert.equal(originalSuper.traces[0].showlegend, false);
 assert.equal(originalSuper.traces[1].showlegend, false);
+// Historical bar is visible to the right, partially overlapped by the foreground bar.
+const oldTrace=originalSuper.traces[0],newTrace=originalSuper.traces[1];
+assert.ok(oldTrace.offset>newTrace.offset, 'pale historic bar must be shifted right');
+assert.ok(oldTrace.offset<newTrace.offset+newTrace.width, 'bars must overlap, not be detached');
+assert.equal(oldTrace.text[0],`${model.items[0].previous.toFixed(1)}%`,'historic bar has its own percentage label');
+assert.equal(newTrace.text[0],`${model.items[0].current.toFixed(1)}%`,'current bar has its own percentage label');
+
 run("state.from='2026-10-01'; state.to='2026-10-13';");
 const filteredSuper = run('renderSupermedia(testRows.filter(inWindow))');
 assert.deepEqual(filteredSuper.traces.map(t=>t.y), originalSuper.traces.map(t=>t.y),
@@ -81,4 +88,15 @@ assert.equal(exported.length,2,'hidden party is removed completely from the PNG'
 assert.equal(exported.filter(t=>t.showlegend).length,1,'one legend entry per visible party');
 assert.equal(exported.find(t=>t.showlegend).name,'FdI');
 assert.match(run('exportLayoutForPng(exportTracesForPng()).annotations.find(a=>a.text?.includes("Intervalli")).text'),/FdI/);
-console.log('OK v8 coalition checkboxes, strict same-poll sums, annual supermedia, date-filter independence and PNG legends');
+
+run(`state.from='2026-01-01';state.to='2026-12-31';state.reportedMode=true;state.coalitionMode=false;state.coalitionScenario='CSX vs. CDX vs. FN';state.coalitionPolls=[
+  {date:'2026-05-27',firm:'BiDiMedia',scenario:'CSX vs. CDX vs. FN',n:1000,CSX:45.6,CDX:45.1},
+  {date:'2026-09-15',firm:'Eumetra',scenario:'CSX vs. CDX vs. FN',n:800,CSX:41.9,CDX:40.7},
+  {date:'2026-10-15',firm:'SWG',scenario:'Another coalition scenario',n:1200,CSX:44.6,CDX:44.0}
+];state.tab='trend';`);
+assert.equal(run('chartParties().join(",")'),'CSX,CDX','published coalition series use directly surveyed values');
+assert.equal(run('displayedRows(testRows).length'),2,'do not pool surveys with different coalition scenarios');
+assert.equal(run('renderTrend(displayedRows(testRows)).traces.length'),2,'two published coalition series');
+run('state.reportedMode=false;');
+
+console.log('OK v9 coalition checkboxes, strict same-poll sums, annual supermedia, date-filter independence and PNG legends');

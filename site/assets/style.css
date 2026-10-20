@@ -102,3 +102,20 @@
 .coalition-actions{display:flex;flex-direction:column;gap:9px;margin-top:12px}
 .coalition-status{font-size:11px;color:#71849c;line-height:1.45}
 @media(max-width:680px){.coalition-dropdown{width:100%}.coalition-dropdown summary{width:100%}.coalition-dropdown-panel{left:0;right:auto;width:100%}.coalition-checklist{grid-template-columns:1fr}}
+
+/* v9: compact headline and clearly explained comparison BELOW the plot */
+#super-caption[hidden]{display:none!important}
+.super-caption{font-size:12px;line-height:1.65;color:#71829b;margin:0 32px 14px;padding:10px 13px;background:#f7f9fd;border:1px solid #e5ebf5;border-radius:6px}
+.super-caption strong{color:#2c4262}
+.coalition-dropdown-panel{width:min(410px,89vw);max-height:min(68vh,610px);overflow:auto}
+.coalition-mode-options select,.coalition-reported select{width:100%;min-height:38px;border:1px solid #d5e0f0;border-radius:7px;background:#fff;color:#263a56;padding:6px;font:600 12px 'DM Sans',sans-serif}
+.coalition-mode-options{margin-bottom:11px}
+.coalition-presets{display:flex;flex-wrap:wrap;gap:7px;margin:0 0 11px}
+.coalition-preset,.coalition-secondary{cursor:pointer;border:1px solid #bdcee7;color:#375d90;background:#f0f5fc;border-radius:7px;padding:7px 10px;font:700 11px 'DM Sans',sans-serif}
+.coalition-checklist{max-height:190px;overflow:auto;overscroll-behavior:contain}
+.coalition-check{cursor:pointer;user-select:none}
+.coalition-check:has(input:checked){border-color:#afc7ec;background:#edf4ff}
+.coalition-actions{display:grid;grid-template-columns:1fr 1fr;align-items:center;gap:8px}
+.coalition-toggle{min-height:36px}
+.coalition-reported[hidden],.coalition-custom[hidden]{display:none!important}
+@media(max-width:680px){.super-caption{margin:0 16px 12px;font-size:11px}.coalition-dropdown-panel{width:100%;max-height:60vh}.coalition-actions{grid-template-columns:1fr}}
