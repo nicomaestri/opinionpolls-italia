@@ -1,6 +1,6 @@
 'use strict';
 
-const DEFAULT_PARTIES = ['FdI', 'PD', 'M5S', 'Lega', 'FI', 'AVS'];
+const DEFAULT_PARTIES = ['FdI', 'PD', 'M5S', 'Lega', 'FI', 'AVS', 'A', 'IV', '+E', 'NM', 'ScN', 'PLD', 'FN'];
 let PARTY_NAMES = [...DEFAULT_PARTIES];
 const COLORS = {CSX:'#c55269',CDX:'#386eb3',FdI:'#436ad9', PD:'#d34f60', M5S:'#ce9c24', Lega:'#349a74', FI:'#5e9cc9', AVS:'#9873c8', A:'#be754a', IV:'#8c62b1', '+E':'#e58a5a', NM:'#657f97', ScN:'#488a8c', PLD:'#b86c8d', FN:'#5d526f', DSP:'#8b8d39', Others:'#85909c'};
 const COALITION_KEY = '__custom_coalition__';
