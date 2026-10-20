@@ -119,3 +119,34 @@
 .coalition-toggle{min-height:36px}
 .coalition-reported[hidden],.coalition-custom[hidden]{display:none!important}
 @media(max-width:680px){.super-caption{margin:0 16px 12px;font-size:11px}.coalition-dropdown-panel{width:100%;max-height:60vh}.coalition-actions{grid-template-columns:1fr}}
+
+/* v10: date filters are visible in analytical tabs 02–06, not in supermedia */
+.smoothing-controls{align-items:center;gap:20px}
+.smoothing-controls .control-slider{flex:1 1 240px}
+.control-explanation{font-size:11px;color:#8190a4;max-width:480px}
+.historical-date-controls{display:flex;align-items:end;gap:15px;margin:20px 32px 0;padding:14px 18px;background:#f8fafe;border:1px solid #e5ebf4;border-radius:8px}
+.historical-date-controls[hidden],.coalition-gap[hidden]{display:none!important}
+.historical-date-controls .control-control{flex:0 1 195px}
+.historical-date-controls p{font-size:11px;color:#7d8ba1;line-height:1.5;flex:1;margin:0 0 5px}
+.coalition-gap{margin:2px 32px 15px;border:1px solid #cadaed;border-left:3px solid #4976b7;background:#f6f9fd;padding:11px 14px;border-radius:6px;color:#2b4e77;font-weight:700;font-size:12px}
+/* two independent named coalition selectors, draft state persists while the menu stays open */
+.coalition-dropdown-panel{width:min(520px,92vw);max-height:min(75vh,690px)}
+.coalition-group{border:1px solid #e1e9f5;background:#fbfcff;border-radius:8px;padding:10px;margin:11px 0}
+.coalition-group>strong{font:800 12px 'DM Sans',sans-serif;color:#2d4565;display:block;margin-bottom:7px}
+.coalition-group .coalition-checklist{max-height:134px}
+.coalition-historical{display:flex;align-items:center;gap:8px;margin:10px 0;color:#405977;font-weight:600;font-size:12px}
+.coalition-overlap-note{color:#a35b38;font-size:11px;line-height:1.5;margin:6px 0}
+/* method notes in dashboard order */
+.methodology .methods-intro{font-size:12px;color:#8a97aa;margin:12px 0 6px}
+.method-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin-top:24px}
+.method-card{border:1px solid #e5ebf3;border-radius:10px;padding:19px 20px;background:#fff;min-width:0}
+.method-card h3{font:800 15px Manrope,sans-serif;margin:10px 0;color:#293c5a}
+.method-card p{font-size:12px;line-height:1.65;color:#77869b;margin:0 0 10px}
+.method-card p:last-child{margin-bottom:0}
+.method-card strong{color:#3d506e}
+.method-card.coalitions-method{grid-column:1/-1;background:#f8fbff}
+@media(max-width:680px){.smoothing-controls{display:block}.smoothing-controls .control-explanation{display:block;margin-top:10px}.historical-date-controls{margin:16px 16px 0;display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px}.historical-date-controls p{grid-column:1/-1}.coalition-gap{margin:7px 16px 13px}.method-cards{grid-template-columns:1fr;gap:12px}.method-card.coalitions-method{grid-column:auto}.method-card{padding:14px 15px}.coalition-dropdown-panel{max-height:75vh}.coalition-group .coalition-checklist{max-height:136px;grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+.history-switch{display:flex;align-items:center;gap:7px;border:1px solid #dce5f1;background:#fff;border-radius:7px;padding:9px 12px;min-height:39px;font:600 12px 'DM Sans',sans-serif;color:#425a78;cursor:pointer;white-space:nowrap}
+.history-switch input{margin:0;accent-color:#486bde}
+@media(max-width:680px){.history-switch{width:100%;justify-content:flex-start}}

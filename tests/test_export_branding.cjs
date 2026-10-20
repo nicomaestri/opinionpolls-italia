@@ -24,3 +24,8 @@ console.log('OK white PNG export, visible-trace legend filtering, title, signatu
 
 // Run the new user-coalition/snapshot/export regression checks in the existing CI job.
 require('./coalition_snapshot.test.cjs');
+
+// v10 regressions are part of the GitHub Actions test step.
+require('./coalition_comparison.test.cjs');
+
+require('./coalition_menu.test.cjs');
