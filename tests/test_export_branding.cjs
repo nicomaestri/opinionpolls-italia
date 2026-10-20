@@ -29,3 +29,6 @@ require('./coalition_snapshot.test.cjs');
 require('./coalition_comparison.test.cjs');
 
 require('./coalition_menu.test.cjs');
+
+// v11: compare two coalitions and arbitrarily selected standalone parties.
+require('./comparison_chart_v11.test.cjs');

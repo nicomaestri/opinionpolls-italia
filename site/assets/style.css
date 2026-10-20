@@ -150,3 +150,12 @@
 .history-switch{display:flex;align-items:center;gap:7px;border:1px solid #dce5f1;background:#fff;border-radius:7px;padding:9px 12px;min-height:39px;font:600 12px 'DM Sans',sans-serif;color:#425a78;cursor:pointer;white-space:nowrap}
 .history-switch input{margin:0;accent-color:#486bde}
 @media(max-width:680px){.history-switch{width:100%;justify-content:flex-start}}
+
+/* v11: editorial title field and comparable standalone parties */
+.custom-title-control{display:flex;flex-direction:column;gap:3px;min-width:175px;max-width:255px;flex:1 1 175px;color:#6b7c96;font:700 11px 'DM Sans',sans-serif}
+.custom-title-control input{min-height:39px;border:1px solid #dce5f1;border-radius:7px;padding:9px 11px;background:#fff;color:#293c5c;font:600 12px 'DM Sans',sans-serif;width:100%}
+.custom-title-control input:focus{outline:2px solid #b8c9ef;outline-offset:1px}
+.comparison-extras{background:#f4f8ff;border-color:#cfdff3}
+.comparison-extras .coalition-checklist{max-height:180px}
+.coalition-overlap-note:not(:empty){background:#fff7e9;border-radius:6px;padding:8px}
+@media(max-width:680px){.custom-title-control{max-width:none;flex-basis:100%}.custom-title-control input{width:100%}}
