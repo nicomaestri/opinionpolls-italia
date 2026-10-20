@@ -2,6 +2,40 @@
 
 Un sito pubblico e gratuito per esplorare i sondaggi italiani con cinque analisi interattive: **medie settimanali + LOWESS**, **IC campionari 95%**, **CV settimanale tra istituti**, **boxplot per istituto**, **matrice di correlazione LOWESS**. Frontend statico (`site/`), Python per il download e GitHub Actions per aggiornare e pubblicare.
 
+## Avvio rapido: pubblicare sul tuo account GitHub
+
+1. Crea un repository **pubblico** (es. `opinionpolls-italia`) su https://github.com/new.
+2. Carica **tutti i file della cartella del progetto** nella radice del repository, inclusa `.github/workflows/pages.yml` (non soltanto `index.html`). Puoi usare Git, oppure *Add file → Upload files* su GitHub; per cartelle nascoste è più affidabile `git push`.
+3. Vai in **Settings → Pages → Build and deployment → Source** e scegli **GitHub Actions**.
+4. Vai in **Actions**, apri **Update data and publish site**, clicca **Run workflow**. Attendi il completamento.
+5. Il sito comparirà su `https://TUO-USERNAME.github.io/opinionpolls-italia/` (sostituisci username e nome repository).
+
+Una volta configurato, l'azione GitHub si avvia automaticamente **quattro volte al giorno**, scarica la pagina Wikipedia, aggiorna il JSON solo se trova cambiamenti e pubblica il sito. La pianificazione di GitHub Actions può subire ritardi; inoltre i sondaggi compaiono soltanto quando sono pubblicati nella pagina sorgente. Se Wikipedia è temporaneamente irraggiungibile, viene mantenuto l'ultimo dataset valido anziché cancellarlo.
+
+**Configurazione del repository**: abilita le GitHub Actions e verifica in **Settings → Actions → General → Workflow permissions** che il token abbia accesso in scrittura per aggiornare il file JSON (`Read and write permissions`). Se il token non può effettuare commit, la fase di pubblicazione può fallire fino alla correzione dei permessi.
+
+## Uso in locale
+
+```bash
+python -m http.server 8000 --directory site
+```
+
+Apri `http://localhost:8000`. Non aprire direttamente `site/index.html` via `file://`, perché `fetch()` potrebbe non caricare il file JSON.
+
+Per recuperare manualmente i dati più recenti:
+
+```bash
+pip install -r requirements.txt
+python scripts/fetch_polls.py
+```
+
+Per eseguire i test del parser:
+
+```bash
+python -m unittest discover -s tests -v
+node tests/correlation.test.cjs
+```
+
 ## Che cosa misura ciascun grafico
 
 1. **Trend**: si calcola la media dei sondaggi dello stesso istituto nella stessa settimana (`W-SUN`), poi la media delle medie degli istituti (peso uguale per istituto). Si applica LOWESS robusto alle medie settimanali; ampiezza regolabile (10–70%). La prima analisi consente di passare da quote percentuali a un indice base 100 (prima settimana selezionata = 100), come nel notebook originario. Il campo data si riferisce al punto centrale dell'intervallo di fieldwork.
@@ -118,3 +152,65 @@ seriale delle rilevazioni per istituto e l'incertezza associata alla selezione
 
 Test: `node tests/house_effects.test.cjs`. Non sono richieste dipendenze
 aggiuntive per la stima, che viene eseguita nel browser.
+
+
+## Versione 7 — Coalizioni personalizzate e Ultima supermedia
+
+Le coalizioni **non** provengono dalle aggregazioni già presenti su Wikipedia.
+L'utente seleziona almeno due partiti nel filtro generale, inserisce un nome e
+attiva **Crea coalizione** nelle sole tab **Serie storiche**, **Intervalli di
+confidenza** e **Ultima supermedia**. In queste tre tab la singola coalizione
+sostituisce le serie dei suoi componenti; premendo «Mostra partiti singoli»
+si ripristinano le curve individuali. **CV, House Effects, boxplot e
+Correlazioni sono immutati** e lavorano esclusivamente sulle serie originali.
+
+### Coalizioni: somma *dentro il singolo sondaggio*
+
+Per l'istituto `i` e il sondaggio `s`, la quota di coalizione è:
+
+```text
+p̂_{coal,i,s} = Σ_{p ∈ S} p̂_{p,i,s}
+```
+
+Una rilevazione è ammissibile **solo se lo stesso sondaggio riporta tutte le
+quote** dei partiti selezionati. Una casella assente non è mai trattata come
+uno zero. In seguito si calcola una media per istituto-settimana, si media
+tra istituti con pesi uguali e si applica LOWESS. Gli intervalli al 95% per
+il singolo sondaggio aggregato adottano la consueta approssimazione binomiale
+basata sulla quota complessiva, assumendo categorie di voto mutuamente
+esclusive e ignorando ponderazione e design effects.
+
+### Ultima supermedia: confronto temporale
+
+La "supermedia" qui indica esplicitamente **LOWESS delle medie settimanali
+con uguale peso tra istituti**, non un modello probabilistico del consenso
+vero. Il valore attuale è l'estremo più recente della curva LOWESS; il
+confronto sbiadito è stimato sull'archivio *troncato* alla data di circa 30
+giorni prima. Le date settimanali sono convenzionalmente la domenica della
+settimana di fieldwork. La scelta del cutoff comporta un'approssimazione di
+pochi giorni (fino alla settimana precedente). Servono almeno tre settimane;
+le serie arretrate oltre 14 giorni dal riferimento condiviso vengono omesse.
+Questo confronto è descrittivo e ricostruito in base al fieldwork, **non è una
+serie storica di previsioni pubblicate allora** (non conosciamo le date
+esatte di pubblicazione di tutte le rilevazioni).
+
+### Esportazioni PNG
+
+L'esportazione crea una figura separata con sfondo bianco, titolo dinamico,
+periodo, firma e legenda. Per le serie storiche e gli intervalli campionari:
+- soltanto le tracce **visibili** sono esportate, anche dopo l'uso della
+  legenda interattiva di Plotly;
+- i sondaggi grezzi non duplicano le voci della legenda LOWESS;
+- quando è visibile un solo partito, il titolo contiene il suo nome.
+
+### Intuizione nella scheda Variabilità tra istituti
+
+Un CV più elevato significa una dispersione **relativa** più alta tra le quote
+stimate dagli istituti: non indica automaticamente un aumento del movimento
+degli elettori né determina, da solo, un intervallo di confidenza. Gli house
+effects stimati sono scostamenti **relativi** alla media degli istituti
+confrontabili, controllando per la settimana, non errori rispetto al vero
+consenso.
+
+Test automatici aggiuntivi: `node tests/coalition_snapshot.test.cjs`, incluso
+nel test esistente `node tests/test_export_branding.cjs` del workflow GitHub.

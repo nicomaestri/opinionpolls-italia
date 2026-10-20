@@ -3,13 +3,16 @@
 const DEFAULT_PARTIES = ['FdI', 'PD', 'M5S', 'Lega', 'FI', 'AVS'];
 let PARTY_NAMES = [...DEFAULT_PARTIES];
 const COLORS = {FdI:'#436ad9', PD:'#d34f60', M5S:'#ce9c24', Lega:'#349a74', FI:'#5e9cc9', AVS:'#9873c8', A:'#be754a', IV:'#8c62b1', '+E':'#e58a5a', NM:'#657f97', ScN:'#488a8c', PLD:'#b86c8d', FN:'#5d526f', DSP:'#8b8d39', Others:'#85909c'};
+const COALITION_KEY = '__custom_coalition__';
+const COALITION_COLOR = '#245a87';
 const EXTRA_COLORS = ['#3b8f83','#b97463','#789bc4','#bd698c','#8e82ac','#b09342'];
 function colorOf(party) {
+  if(party===COALITION_KEY) return COALITION_COLOR;
   if(COLORS[party]) return COLORS[party];
   let hash=0;for(const ch of party)hash=((hash*33)+ch.codePointAt(0))>>>0;
   return EXTRA_COLORS[hash%EXTRA_COLORS.length];
 }
-const state = {polls:[], selected:new Set(DEFAULT_PARTIES), tab:'trend', span:0.30, from:'', to:'', boxParty:'FdI', scale:'share', corrMode:'changes',cvView:'cv',houseView:'ranking',houseParty:'FdI'};
+const state = {polls:[], selected:new Set(DEFAULT_PARTIES), tab:'trend', span:0.30, from:'', to:'', boxParty:'FdI', scale:'share', corrMode:'changes',cvView:'cv',houseView:'ranking',houseParty:'FdI',coalitionMode:false,coalitionName:'Coalizione personalizzata'};
 const $ = id => document.getElementById(id);
 const dateUTC = date => new Date(`${date}T12:00:00Z`);
 const toISO = date => date.toISOString().slice(0,10);
@@ -29,6 +32,28 @@ function weekEndingSunday(iso) {
 function inWindow(p) {return p.date >= state.from && p.date <= state.to;}
 function filtered() {return state.polls.filter(inWindow);}
 function selectedParties() {return PARTY_NAMES.filter(p=>state.selected.has(p));}
+function coalitionActive() { return state.coalitionMode && selectedParties().length >= 2; }
+function chartParties() { return coalitionActive() ? [COALITION_KEY] : selectedParties(); }
+function partyLabel(party) {
+  return party === COALITION_KEY ? (state.coalitionName || 'Coalizione personalizzata') : party;
+}
+// A missing party estimate is NOT a zero vote share. The coalition observation
+// is defined only when all its components were published in the SAME poll.
+function coalitionPollValue(poll, members) {
+  if(members.length < 2 || !members.every(p => isValue(poll[p]))) return null;
+  const sum=members.reduce((acc,p)=>acc+poll[p],0);
+  return sum >= 0 && sum <= 100.000001 ? Math.min(100,sum) : null;
+}
+function chartRows(rows) {
+  if(!coalitionActive()) return rows;
+  const members=selectedParties();
+  return rows.map(row=>({...row,[COALITION_KEY]:coalitionPollValue(row,members)}));
+}
+function coalitionAvailability(rows) {
+  if(!coalitionActive()) return '';
+  const count=rows.filter(r=>isValue(r[COALITION_KEY])).length;
+  return ` Coalizione: ${count}/${rows.length} sondaggi riportano tutti i partiti selezionati.`;
+}
 
 // Keep firm-level means first; then give each polling firm equal weight per week.
 function weeklyStats(polls, party) {
@@ -125,32 +150,81 @@ function withChartSignature(layout) {
 
 function renderTrend(rows) {
   const traces=[]; let total=0;
-  for(const party of selectedParties()) {
+  for(const party of chartParties()) {
     const agg=weeklyStats(rows,party);if(!agg.length) continue;
     total+=agg.length;
+    const label=partyLabel(party);
     const levels=state.scale==='index' ? agg.map(v=>100*v.mean/agg[0].mean) : agg.map(v=>v.mean);
-    traces.push({x:agg.map(v=>v.date),y:levels,name:`${party} · media sett.`,type:'scatter',mode:'lines+markers',line:{color:colorOf(party),width:1},marker:{color:colorOf(party),size:5},opacity:.36,legendgroup:party,hovertemplate:`${party} · %{x}<br>Media: %{y:.2f}%<extra></extra>`});
-    if(agg.length>=3)traces.push({x:agg.map(v=>v.date),y:lowess(agg.map((v,i)=>({date:v.date,y:levels[i]})),state.span),name:`${party} · LOWESS`,type:'scatter',mode:'lines',line:{color:colorOf(party),width:3.3},legendgroup:party,hovertemplate:`${party} · LOWESS<br>%{x}: %{y:.2f}%<extra></extra>`});
+    traces.push({x:agg.map(v=>v.date),y:levels,name:`${label} · media sett.`,type:'scatter',mode:'lines+markers',line:{color:colorOf(party),width:1},marker:{color:colorOf(party),size:5},opacity:.36,legendgroup:party,hovertemplate:`${label} · %{x}<br>Media: %{y:.2f}${state.scale==='index'?'':'%'}<extra></extra>`});
+    if(agg.length>=3)traces.push({x:agg.map(v=>v.date),y:lowess(agg.map((v,i)=>({date:v.date,y:levels[i]})),state.span),name:`${label} · LOWESS`,type:'scatter',mode:'lines',line:{color:colorOf(party),width:3.3},legendgroup:party,hovertemplate:`${label} · LOWESS<br>%{x}: %{y:.2f}${state.scale==='index'?'':'%'}<extra></extra>`});
   }
   const layout=layoutBase();
   if(state.scale==='index'){layout.yaxis={...axes,title:'Indice (prima settimana = 100)',ticksuffix:'',rangemode:'normal'};}
-  return {traces,layout,description:`${total} medie partito-settimana. Ogni istituto conta una volta per settimana.${state.scale==='index'?' Indice = 100 alla prima settimana del periodo selezionato.':''}`};
+  return {traces,layout,description:`${total} medie partito-settimana. Ogni istituto conta una volta per settimana.${state.scale==='index'?' Indice = 100 alla prima settimana del periodo selezionato.':''}${coalitionAvailability(rows)}`};
 }
 
 function renderCI(rows) {
   const traces=[];let count=0,without=0;
-  for(const party of selectedParties()) {
+  for(const party of chartParties()) {
+    const label=partyLabel(party);
     const usable=rows.filter(v=>isValue(v[party]));
     without+=usable.filter(v=>!v.n).length;
     const p=usable.filter(v=>v.n && v.n>=100);
     if(!p.length)continue;
     count+=p.length;
     const halfwidths=p.map(v=>1.96*100*Math.sqrt((v[party]/100)*(1-v[party]/100)/v.n));
-    traces.push({type:'scatter',mode:'markers',x:p.map(v=>v.date),y:p.map(v=>v[party]),name:`${party} · sondaggi`,legendgroup:party,marker:{size:6,color:colorOf(party),opacity:.55},error_y:{type:'data',array:halfwidths,visible:true,color:colorOf(party)+'66',thickness:.7,width:1.7},customdata:p.map((v,i)=>[v.firm,v.n,halfwidths[i],Math.max(0,v[party]-halfwidths[i]),Math.min(100,v[party]+halfwidths[i])]),hovertemplate:`${party} · %{x}<br>Istituto: %{customdata[0]}<br>Stima: %{y:.1f}%<br>Campione: %{customdata[1]}<br>IC 95%: [%{customdata[3]:.2f}%, %{customdata[4]:.2f}%]<extra>IC teorico</extra>`});
+    traces.push({type:'scatter',mode:'markers',x:p.map(v=>v.date),y:p.map(v=>v[party]),name:`${label} · sondaggi`,legendgroup:party,marker:{size:6,color:colorOf(party),opacity:.55},error_y:{type:'data',array:halfwidths,visible:true,color:colorOf(party)+'66',thickness:.7,width:1.7},customdata:p.map((v,i)=>[v.firm,v.n,halfwidths[i],Math.max(0,v[party]-halfwidths[i]),Math.min(100,v[party]+halfwidths[i])]),hovertemplate:`${label} · %{x}<br>Istituto: %{customdata[0]}<br>Stima: %{y:.1f}%<br>Campione: %{customdata[1]}<br>IC 95%: [%{customdata[3]:.2f}%, %{customdata[4]:.2f}%]<extra>IC teorico</extra>`});
     const agg=weeklyStats(rows,party);
-    if(agg.length>=3)traces.push({type:'scatter',mode:'lines',x:agg.map(v=>v.date),y:lowess(agg.map(v=>({date:v.date,y:v.mean})),state.span),name:`${party} · LOWESS`,legendgroup:party,line:{color:colorOf(party),width:2.7},hovertemplate:`LOWESS ${party}: %{y:.2f}%<extra></extra>`});
+    if(agg.length>=3)traces.push({type:'scatter',mode:'lines',x:agg.map(v=>v.date),y:lowess(agg.map(v=>({date:v.date,y:v.mean})),state.span),name:`${label} · LOWESS`,legendgroup:party,line:{color:colorOf(party),width:2.7},hovertemplate:`LOWESS ${label}: %{y:.2f}%<extra></extra>`});
   }
-  return {traces,layout:layoutBase(),description:`${numFmt(count)} osservazioni con numerosità nota. ${numFmt(without)} misure senza n escluse dagli IC (non dalle altre analisi).`};
+  return {traces,layout:layoutBase(),description:`${numFmt(count)} osservazioni con numerosità nota. ${numFmt(without)} misure senza n escluse dagli IC (non dalle altre analisi).${coalitionAvailability(rows)}`};
+}
+
+function supermediaSnapshot(rows, parties, span=state.span) {
+  const aggregates=new Map(parties.map(p=>[p,weeklyStats(rows,p)]));
+  const dates=Array.from(aggregates.values()).flatMap(a=>a.map(d=>d.date));
+  if(!dates.length) return {anchor:null,comparison:null,items:[]};
+  const anchor=dates.sort().at(-1);  // shared reference week for all displayed parties
+  const cutoff=toISO(new Date(dateUTC(anchor).getTime()-30*86400000));
+  const items=[];
+  for(const party of parties){
+    const weekly=aggregates.get(party);
+    if(weekly.length<3)continue;
+    const latest=weekly.at(-1);
+    if((dateUTC(anchor)-dateUTC(latest.date))/86400000>14)continue; // stale series
+    const current=lowess(weekly.map(v=>({date:v.date,y:v.mean})),span).at(-1);
+    const historical=weekly.filter(v=>v.date<=cutoff);
+    let previous=null, previousDate=null;
+    if(historical.length>=3 && (dateUTC(cutoff)-dateUTC(historical.at(-1).date))/86400000<=14){
+      previous=lowess(historical.map(v=>({date:v.date,y:v.mean})),span).at(-1);
+      previousDate=historical.at(-1).date;
+    }
+    items.push({party,label:partyLabel(party),current,previous,latest:latest.date,previousDate});
+  }
+  items.sort((a,b)=>b.current-a.current);
+  return {anchor,comparison:cutoff,items};
+}
+function renderSupermedia(rows) {
+  const {anchor,comparison,items}=supermediaSnapshot(rows,chartParties());
+  if(!items.length)return {traces:[],layout:layoutBase(),description:'Non ci sono almeno tre settimane valide di rilevazioni recenti per i partiti selezionati.'};
+  const labels=items.map(d=>d.label), colors=items.map(d=>colorOf(d.party));
+  const previous={type:'bar',name:'Circa 30 giorni prima',x:labels,y:items.map(d=>d.previous),
+    width:.82,marker:{color:colors.map(c=>c+'55'),line:{color:colors.map(c=>c+'99'),width:1}},
+    hovertemplate:'%{x}<br>Supermedia precedente: %{y:.2f}%<extra></extra>'};
+  const current={type:'bar',name:'Ultima supermedia',x:labels,y:items.map(d=>d.current),
+    width:.57,marker:{color:colors,line:{color:'#ffffff',width:.7}},
+    text:items.map(d=>`${d.current.toFixed(1)}%`),textposition:'outside',textfont:{size:14,color:'#263b5b'},cliponaxis:false,
+    customdata:items.map(d=>[d.latest,d.previous,d.previousDate||'n.d.']),
+    hovertemplate:'%{x}<br>Ultima supermedia: %{y:.2f}%<br>Settimana: %{customdata[0]}<br>30 gg prima: %{customdata[1]:.2f}%<extra></extra>'};
+  const layout=layoutBase();
+  layout.barmode='overlay'; layout.bargap=.25;
+  layout.margin={l:68,r:30,t:82,b:117};
+  layout.legend={orientation:'h',x:0,y:1.10,yanchor:'bottom',font:{size:12}};
+  layout.xaxis={...axes,type:'category',showgrid:false,tickfont:{size:12,color:'#41536d'}};
+  layout.yaxis={...axes,title:'Intenzioni di voto (%)',ticksuffix:'%',rangemode:'tozero',range:[0,Math.max(5,...items.map(d=>d.current),...items.map(d=>d.previous||0))*1.22]};
+  const lacking=items.filter(i=>i.previous===null).length;
+  const msg=`${items.length} ${coalitionActive()?'coalizione':'partiti'} · riferimento settimanale ${anchor}; confronto con rilevazioni fino al ${comparison}. La barra sbiadita mostra una LOWESS calcolata solo sulle settimane fino a circa 30 giorni prima.${lacking?` Confronto precedente non disponibile per ${lacking} voci.`:''}`;
+  return {traces:[previous,current],layout,description:msg};
 }
 
 function renderCV(rows) {
@@ -310,7 +384,8 @@ const tabMetadata={
   ci:['Intervalli di confidenza campionari','Ogni punto rappresenta un sondaggio; le barre indicano un IC teorico binomiale al 95%.'],
   cv:['Variabilità tra istituti','Dispersione osservata (CV) e differenze sistematiche tra istituti stimate con effetti fissi OLS.'],
   box:['Distribuzione storica per istituto','Boxplot dei sondaggi per istituto nel periodo selezionato. Scegli il partito da confrontare.'],
-  corr:['Correlazioni tra partiti','Matrice di Pearson delle curve LOWESS: confronta livelli oppure variazioni settimanali.']
+  corr:['Correlazioni tra partiti','Matrice di Pearson delle curve LOWESS: confronta livelli oppure variazioni settimanali.'],
+  super:['Ultima supermedia','Ultime stime LOWESS sulle medie settimanali (uguale peso per istituto), confrontate con circa 30 giorni prima.']
 };
 
 let lastRender=null;
@@ -318,6 +393,21 @@ let lastRender=null;
 function render(){
   const [title, desc]=tabMetadata[state.tab];$('chart-title').textContent=title;$('chart-description').textContent=desc;
   $('chart-tools').innerHTML='';
+  const supportsCoalition=['trend','ci','super'].includes(state.tab);
+  const builder=$('coalition-builder'); builder.hidden=!supportsCoalition;
+  if(supportsCoalition){
+    $('coalition-toggle').disabled=selectedParties().length<2;
+    $('coalition-toggle').textContent=coalitionActive()?'← Mostra partiti singoli':'Crea coalizione dai partiti selezionati';
+    $('coalition-members').textContent=coalitionActive()
+      ? `Coalizione: ${selectedParties().join(' + ')} · esclusi i sondaggi incompleti`
+      : 'Seleziona almeno due partiti; la somma viene fatta nello stesso sondaggio.';
+  }
+  const insight=$('chart-insight'); insight.hidden=state.tab!=='cv';
+  if(state.tab==='cv'){
+    insight.innerHTML=state.cvView==='house'
+      ? '<strong>Come leggere gli house effects:</strong> rosso = un istituto rileva sistematicamente il partito più in alto degli altri, blu = più in basso, controllando per la settimana. Non misura un errore rispetto al voto «vero».'
+      : '<strong>Come leggere il CV:</strong> più è alto, meno concordano in proporzione gli istituti su quel partito. Può riflettere differenze metodologiche, rumore o cambiamenti nel periodo: non dimostra da solo maggiori movimenti di elettori né equivale a un intervallo di confidenza.';
+  }
   if(state.tab==='trend'){
     const sel=document.createElement('select');sel.setAttribute('aria-label','Scala della serie storica');
     for(const [value,label] of [['share','Scala: percentuale'],['index','Scala: indice base 100']]){
@@ -357,19 +447,23 @@ function render(){
     sel.addEventListener('change',e=>{state.corrMode=e.target.value;render();});$('chart-tools').append(sel);
   }
   const rows=filtered();
-  const res=state.tab==='trend'?renderTrend(rows):state.tab==='ci'?renderCI(rows):state.tab==='cv'?(state.cvView==='house'?renderHouseEffects(rows):renderCV(rows)):state.tab==='box'?renderBox(rows):renderCorrelations(rows);
+  const chartData=supportsCoalition?chartRows(rows):rows;
+  const res=state.tab==='trend'?renderTrend(chartData):state.tab==='ci'?renderCI(chartData):state.tab==='super'?renderSupermedia(chartData):state.tab==='cv'?(state.cvView==='house'?renderHouseEffects(rows):renderCV(rows)):state.tab==='box'?renderBox(rows):renderCorrelations(rows);
   $('chart-summary').textContent=res.description;
   $('empty-state').hidden=res.traces.length>0;
   const wrap=document.querySelector('.plot-wrap');
-  wrap.classList.toggle('corr-scroll',state.tab==='corr'||(state.tab==='cv'&&state.cvView==='house'&&state.houseView==='matrix'));
+  const superWide=state.tab==='super'&&chartParties().length>(window.matchMedia('(max-width:680px)').matches?4:8);
+  wrap.classList.toggle('corr-scroll',state.tab==='corr'||(state.tab==='cv'&&state.cvView==='house'&&state.houseView==='matrix')||superWide);
   if(state.tab==='corr'||(state.tab==='cv'&&state.cvView==='house'&&state.houseView==='matrix')) {
     // Large matrices stay legible on phones via internal horizontal scrolling.
     wrap.style.setProperty('--corr-min-width',`${Math.max(610,selectedParties().length*58+165)}px`);
+  } else if(superWide){
+    wrap.style.setProperty('--corr-min-width',`${Math.max(660,chartParties().length*86)}px`);
   } else wrap.style.removeProperty('--corr-min-width');
   const mobile=window.matchMedia('(max-width:680px)').matches;
   const layout = {...res.layout};
   if(mobile && !(state.tab==='corr'||(state.tab==='cv'&&state.cvView==='house'&&state.houseView==='matrix'))) {
-    layout.margin={...layout.margin,l:47,r:18,t:108,b:state.tab==='box'?145:98};
+    layout.margin={...layout.margin,l:47,r:18,t:state.tab==='super'?108:108,b:state.tab==='box'?145:98};
     layout.legend={...layout.legend,font:{size:10},y:1.07};
     layout.height=state.tab==='cv'&&state.cvView==='house'?Math.max(515,res.layout.height):515;
     if(state.tab==='cv'&&state.cvView==='house')layout.margin.l=112;
@@ -396,6 +490,7 @@ function escapeMarkup(value) {
   return String(value).replace(/[&<>]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]));
 }
 function exportHeading() {
+  if(state.tab==='super') return 'Media settimanale per istituto + LOWESS · confronto con circa 30 giorni prima';
   if(state.tab==='corr') return state.corrMode==='changes'
     ? 'Pearson r · variazioni settimanali delle curve LOWESS'
     : 'Pearson r · livelli delle curve LOWESS';
@@ -406,22 +501,58 @@ function exportHeading() {
   if(state.tab==='cv')return state.cvView==='house' ? (state.houseView==='ranking'?`OLS con effetti fissi settimanali · ${state.houseParty}`:'OLS con effetti fissi settimanali · matrice per partito') : 'Coefficiente di variazione settimanale per partito';
   return tabMetadata[state.tab][1];
 }
-function exportLayoutForPng() {
+function liveVisibleTraces() {
+  const live=$('chart')._fullData || [];
+  return lastRender.traces.filter((trace,i)=>{
+    const flag=live[i]?.visible ?? trace.visible;
+    return flag!==false && flag!=='legendonly';
+  }).map(t=>JSON.parse(JSON.stringify(t)));
+}
+function exportSeriesLabels(traces) {
+  if(coalitionActive() && ['trend','ci','super'].includes(state.tab))return [partyLabel(COALITION_KEY)];
+  if(!['trend','ci','cv','super'].includes(state.tab) || (state.tab==='cv'&&state.cvView==='house'))return [];
+  if(state.tab==='super')return chartParties().map(partyLabel);
+  const present=new Set(traces.map(t=>t.legendgroup).filter(Boolean));
+  return PARTY_NAMES.filter(p=>present.has(p));
+}
+function exportTracesForPng() {
+  const traces=liveVisibleTraces();
+  // For ordinary series, a single legend item per selected party: LOWESS
+  // (or CV). Raw poll dots and CI whiskers do not duplicate labels.
+  if(['trend','ci'].includes(state.tab)){
+    const labels=exportSeriesLabels(traces);
+    for(const t of traces){
+      t.name=partyLabel(t.legendgroup);
+      t.showlegend=t.mode==='lines';
+      t.legendrank=Math.max(1,labels.indexOf(t.legendgroup)+1);
+    }
+  }
+  return traces;
+}
+function exportLayoutForPng(traces=lastRender.traces) {
   const l=JSON.parse(JSON.stringify(lastRender.layout));
-  // The export must be independent of the screen width or scroll position.
   l.width=1600;
-  l.height=state.tab==='corr' ? Math.max(780,205+selectedParties().length*58) : (state.tab==='cv'&&state.cvView==='house' ? Math.max(800,lastRender.layout.height+140) : 820);
-  l.margin={...l.margin,l:state.tab==='corr'?135:(state.tab==='cv'&&state.cvView==='house'?200:85),r:state.tab==='corr'?150:65,t:145,b:state.tab==='box'?175:112};
+  l.height=state.tab==='corr' ? Math.max(780,205+selectedParties().length*58) : (state.tab==='cv'&&state.cvView==='house' ? Math.max(800,lastRender.layout.height+140) : 850);
+  const labels=exportSeriesLabels(traces);
+  const sole=labels.length===1&&['trend','ci','super'].includes(state.tab);
+  const title=sole?`${lastRender.title} – ${labels[0]}`:lastRender.title;
+  const needsLegend=['trend','ci','cv','super'].includes(state.tab) && !(state.tab==='cv'&&state.cvView==='house');
+  const legendRows=needsLegend?Math.max(1,Math.ceil(labels.length/9)):1;
+  const top=needsLegend?205+Math.max(0,legendRows-1)*26:160;
+  l.margin={...l.margin,l:state.tab==='corr'?135:(state.tab==='cv'&&state.cvView==='house'?200:85),r:state.tab==='corr'?150:65,t:top,b:state.tab==='box'?175:112};
   if(state.tab==='corr'||(state.tab==='cv'&&state.cvView==='house'&&state.houseView==='matrix')) {
     l.xaxis.tickfont={size:15,color:'#354963'};
     l.yaxis.tickfont={size:15,color:'#354963'};
   }
+  // Never preserve legend visibility from old Plotly interactions.
+  l.showlegend=needsLegend;
+  l.legend={...l.legend,orientation:'h',x:0,y:1.035,yanchor:'bottom',font:{size:15,color:'#334155'},tracegroupgap:0};
   l.annotations=[...(l.annotations||[]),
-    {xref:'paper',yref:'paper',x:0,y:1,xanchor:'left',yanchor:'bottom',yshift:78,showarrow:false,
-      font:{family:'Arial,sans-serif',size:28,color:'#1c2740'},text:`<b>${escapeMarkup(lastRender.title)}</b>`},
-    {xref:'paper',yref:'paper',x:0,y:1,xanchor:'left',yanchor:'bottom',yshift:45,showarrow:false,
+    {xref:'paper',yref:'paper',x:0,y:1,xanchor:'left',yanchor:'bottom',yshift:top-37,showarrow:false,
+      font:{family:'Arial,sans-serif',size:28,color:'#1c2740'},text:`<b>${escapeMarkup(title)}</b>`},
+    {xref:'paper',yref:'paper',x:0,y:1,xanchor:'left',yanchor:'bottom',yshift:top-71,showarrow:false,
       font:{family:'Arial,sans-serif',size:17,color:'#6e7f9a'},text:escapeMarkup(exportHeading())},
-    {xref:'paper',yref:'paper',x:0,y:1,xanchor:'left',yanchor:'bottom',yshift:20,showarrow:false,
+    {xref:'paper',yref:'paper',x:0,y:1,xanchor:'left',yanchor:'bottom',yshift:top-99,showarrow:false,
       font:{family:'Arial,sans-serif',size:14,color:'#94a1b1'},
       text:`Periodo: ${escapeMarkup(state.from)} — ${escapeMarkup(state.to)} · LOWESS: ${Math.round(state.span*100)}%`}
   ];
@@ -433,11 +564,13 @@ async function exportChartPng() {
   const original=button.textContent;
   button.disabled=true;button.textContent='Preparazione PNG…';
   const tmp=document.createElement('div');
-  const layout=exportLayoutForPng();
+  const traces=exportTracesForPng();
+  if(!traces.length){button.disabled=false;button.textContent=original;return;}
+  const layout=exportLayoutForPng(traces);
   tmp.style.cssText=`position:fixed;left:-100000px;top:0;width:${layout.width}px;height:${layout.height}px;pointer-events:none`;
   document.body.appendChild(tmp);
   try {
-    await Plotly.newPlot(tmp,lastRender.traces,layout,{displayModeBar:false,staticPlot:true,responsive:false});
+    await Plotly.newPlot(tmp,traces,layout,{displayModeBar:false,staticPlot:true,responsive:false});
     await Plotly.downloadImage(tmp,{format:'png',width:layout.width,height:layout.height,scale:2,
       filename:`opinionpolls-italia-${state.tab}`});
   } catch(err) {
@@ -471,13 +604,21 @@ function setup(){
   $('date-from').addEventListener('change',e=>{state.from=e.target.value||earliest;if(state.from>state.to){state.to=state.from;$('date-to').value=state.to;}render();});
   $('date-to').addEventListener('change',e=>{state.to=e.target.value||latest;if(state.to<state.from){state.from=state.to;$('date-from').value=state.from;}render();});
   $('lowess-span').addEventListener('input',e=>{state.span=Number(e.target.value)/100;$('span-label').textContent=`${e.target.value}%`;render();});
+  $('coalition-toggle').addEventListener('click',()=>{
+    if(!state.coalitionMode && selectedParties().length<2)return;
+    state.coalitionMode=!state.coalitionMode;render();
+  });
+  $('coalition-name').addEventListener('input',e=>{
+    state.coalitionName=e.target.value.replace(/[<>]/g,'').slice(0,48).trim()||'Coalizione personalizzata';
+    if(coalitionActive())render();
+  });
   document.querySelectorAll('.tab').forEach(tab=>tab.addEventListener('click',()=>{
     state.tab=tab.dataset.tab;
     document.querySelectorAll('.tab').forEach(b=>{b.classList.toggle('active',b===tab);b.setAttribute('aria-selected',String(b===tab));});
     render();
   }));
   $('reset-filters').addEventListener('click',()=>{
-    state.from=earliest;state.to=latest;state.span=.30;state.scale='share';state.corrMode='changes';state.cvView='cv';state.houseView='ranking';state.houseParty='FdI';state.selected=new Set(DEFAULT_PARTIES.filter(p=>PARTY_NAMES.includes(p))); 
+    state.from=earliest;state.to=latest;state.span=.30;state.scale='share';state.corrMode='changes';state.cvView='cv';state.houseView='ranking';state.houseParty='FdI';state.selected=new Set(DEFAULT_PARTIES.filter(p=>PARTY_NAMES.includes(p)));state.coalitionMode=false;state.coalitionName='Coalizione personalizzata';$('coalition-name').value=state.coalitionName; 
     $('date-from').value=earliest;$('date-to').value=latest;$('lowess-span').value=30;$('span-label').textContent='30%';updatePartyFilters();render();
   });
   $('export-chart').addEventListener('click', exportChartPng);

@@ -8,7 +8,7 @@ assert.match(code,/plot_bgcolor:\s*['"]#ffffff['"]/);
 assert.match(code,/github\.com\/nicomaestri\/opinionpolls-italia/);
 assert.match(code,/withChartSignature\(layout\)/);
 assert.match(code,/annotations:\s*\[\.\.\.\(layout\.annotations\|\|\[\]\),signature\]/);
-assert.match(code,/function exportLayoutForPng\(\)/);
+assert.match(code,/function exportLayoutForPng\(/);
 assert.match(code,/function exportChartPng\(\)/);
 assert.match(code,/function exportHeading\(\)/);
 assert.match(code,/modeBarButtonsToRemove:\s*\[['"]toImage['"]/);
@@ -18,4 +18,9 @@ assert.match(code,/layout\.height\s*=\s*layout\.height\s*\|\|\s*\(mobile\s*\?\s*
 assert.match(code,/layout\.autosize\s*=\s*true/, 'Plotly must recalculate width on tab changes');
 assert.match(css,/\.plot-wrap\.corr-scroll/);
 assert.match(css,/@media\(max-width:680px\)/);
-console.log('OK white PNG export, title, mode, GitHub signature, rectangular heatmap and mobile scrolling');
+assert.match(code,/function exportTracesForPng\(\)/);
+assert.match(code,/function liveVisibleTraces\(\)/);
+console.log('OK white PNG export, visible-trace legend filtering, title, signature, rectangular heatmap and mobile scrolling');
+
+// Run the new user-coalition/snapshot/export regression checks in the existing CI job.
+require('./coalition_snapshot.test.cjs');
