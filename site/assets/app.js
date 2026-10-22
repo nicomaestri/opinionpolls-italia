@@ -129,6 +129,88 @@ function lowess(values, span) {
   return fitted;
 }
 
+// If no poll reports all coalition components, keep the simulation usable by
+// adding the party-level LOWESS curves. This must NOT be presented as a direct
+// poll of the coalition. Sparse series (fewer than three weeks) use observed
+// weekly levels, not an invented LOWESS.
+const COALITION_COMPONENT_MAX_AGE_DAYS = 21;
+function coalitionParts(party) {
+  if(party===COALITION_KEY)return coalitionMembers();
+  if(party===COALITION_B_KEY)return coalitionBMembers();
+  return [];
+}
+function dayDiff(a,b){return (dateUTC(a)-dateUTC(b))/86400000;}
+function componentCurve(rows, party, span=state.span) {
+  const weekly=weeklyStats(rows,party);
+  const smooth=weekly.length>=3 ? lowess(weekly.map(v=>({date:v.date,y:v.mean})),span) : weekly.map(v=>v.mean);
+  return {party,points:weekly.map((r,i)=>({date:r.date,y:smooth[i]})),sparse:weekly.length<3};
+}
+function valueAtCurve(curve,date,maxAge=COALITION_COMPONENT_MAX_AGE_DAYS) {
+  const points=curve.points;
+  if(!points.length || date < points[0].date)return null; // never extrapolate backward
+  let i=points.length-1;
+  while(i>=0 && points[i].date>date)i--;
+  if(i<0)return null;
+  const prev=points[i];
+  const age=dayDiff(date,prev.date);
+  if(i+1<points.length) {
+    const next=points[i+1];
+    const future=dayDiff(next.date,date);
+    if(future>=0 && age<=maxAge && future<=maxAge){
+      const fraction=age/(age+future || 1);
+      return {value:prev.y+(next.y-prev.y)*fraction,date:date,age:0,interpolated:age>0 && future>0};
+    }
+  }
+  if(age>maxAge)return null;
+  return {value:prev.y,date:prev.date,age,interpolated:false};
+}
+function estimatedCoalitionPoint(curves,date,maxAge=COALITION_COMPONENT_MAX_AGE_DAYS){
+  if(!curves.length || curves.some(c=>!c.points.length))return null;
+  const parts=curves.map(c=>({party:c.party,sparse:c.sparse,point:valueAtCurve(c,date,maxAge)}));
+  if(parts.some(p=>!p.point))return null;
+  const total=parts.reduce((s,p)=>s+p.point.value,0);
+  if(total<0 || total>100.00001)return null; // disallow double counting above 100%
+  return {date,mean:total,parts,approximate:true,
+    sparse:parts.filter(p=>p.sparse).map(p=>p.party),
+    dated:parts.filter(p=>p.point.age>0).map(p=>`${p.party} (${p.point.date})`)};
+}
+function estimatedCoalitionSeries(rows,members,span=state.span){
+  if(members.length<2)return [];
+  const curves=members.map(p=>componentCurve(rows,p,span));
+  // Grid of dates at which at least one selected party has a poll. No missing
+  // component is treated as 0; stale (>21 d) components make that date unavailable.
+  const dates=[...new Set(curves.flatMap(c=>c.points.map(p=>p.date)))].sort();
+  return dates.map(date=>estimatedCoalitionPoint(curves,date)).filter(Boolean);
+}
+function estimatedCoalitionLatest(rows,members,anchor,span=state.span){
+  const curves=members.map(p=>componentCurve(rows,p,span));
+  const current=estimatedCoalitionPoint(curves,anchor);
+  if(!current)return null;
+  const historicalTarget=toISO(new Date(dateUTC(anchor).getTime()-365*86400000));
+  const previous=estimatedCoalitionPoint(curves,historicalTarget,28);
+  return {current,previous,previousDate:previous?historicalTarget:null};
+}
+function needsSyntheticCoalition(rows,party){
+  if(![COALITION_KEY,COALITION_B_KEY].includes(party))return false;
+  const weekly=weeklyStats(rows,party);
+  if(weekly.length<3)return true;
+  const latestWeek=weekEndingSunday(rows.map(r=>r.date).sort().at(-1));
+  return dayDiff(latestWeek,weekly.at(-1).date)>14;
+}
+function syntheticCoalitionTrace(rows,party,scale='share'){
+  const members=coalitionParts(party);
+  const values=estimatedCoalitionSeries(rows,members);
+  if(!values.length)return null;
+  const first=values[0].mean;
+  if(scale==='index' && first<=0)return null;
+  return {type:'scatter',mode:values.length>=2?'lines+markers':'markers',
+    x:values.map(r=>r.date),y:values.map(r=>scale==='index'?100*r.mean/first:r.mean),
+    name:`${partyLabel(party)} · somma stime individuali`,legendgroup:party,
+    line:{color:colorOf(party),width:3,dash:'dot'},marker:{size:7,color:colorOf(party)},
+    customdata:values.map(v=>v.sparse.join(', ')||'nessuno'),
+    hovertemplate:`${partyLabel(party)} · simulazione<br>%{x}: %{y:.2f}${scale==='index'?'':'%'}<br>Partiti con meno di 3 settimane: %{customdata}<extra>Somma di stime, non sondaggio diretto</extra>`};
+}
+
 const axes={
   gridcolor:'#eef2f7', zeroline:false, linewidth:0, linecolor:'#edf1f7', showline:false,
   tickfont:{color:'#8593aa',size:11}, titlefont:{color:'#7a879b',size:11}
@@ -172,6 +254,11 @@ function withChartSignature(layout) {
 function renderTrend(rows) {
   const traces=[]; let total=0;
   for(const party of chartParties()) {
+    if(needsSyntheticCoalition(rows,party)){
+      const trace=syntheticCoalitionTrace(rows,party,state.scale);
+      if(trace)traces.push(trace);
+      continue;
+    }
     const agg=weeklyStats(rows,party);if(!agg.length) continue;
     total+=agg.length;
     const label=partyLabel(party);
@@ -181,13 +268,18 @@ function renderTrend(rows) {
   }
   const layout=layoutBase();
   if(state.scale==='index'){layout.yaxis={...axes,title:'Indice (prima settimana = 100)',ticksuffix:'',rangemode:'normal'};}
-  return {traces,layout,description:`${total} medie partito-settimana. Ogni istituto conta una volta per settimana.${state.scale==='index'?' Indice = 100 alla prima settimana del periodo selezionato.':''}${coalitionAvailability(rows)}`};
+  return {traces,layout,description:`${total} medie partito-settimana. Ogni istituto conta una volta per settimana.${state.scale==='index'?' Indice = 100 alla prima settimana del periodo selezionato.':''}${coalitionAvailability(rows)}${traces.some(t=>t.name?.includes('somma stime individuali'))?' Le coalizioni senza sondaggi completi sono somme di stime per partito: le curve tratteggiate non sono rilevazioni dirette.':''}`};
 }
 
 function renderCI(rows) {
   const traces=[];let count=0,without=0;
   for(const party of chartParties()) {
     const label=partyLabel(party);
+    if(needsSyntheticCoalition(rows,party)){
+      const trace=syntheticCoalitionTrace(rows,party);
+      if(trace)traces.push(trace);
+      continue;
+    }
     const usable=rows.filter(v=>isValue(v[party]));
     without+=usable.filter(v=>!v.n).length;
     const p=usable.filter(v=>v.n && v.n>=100);
@@ -198,7 +290,7 @@ function renderCI(rows) {
     const agg=weeklyStats(rows,party);
     if(agg.length>=3)traces.push({type:'scatter',mode:'lines',x:agg.map(v=>v.date),y:lowess(agg.map(v=>({date:v.date,y:v.mean})),state.span),name:`${label} · LOWESS`,legendgroup:party,line:{color:colorOf(party),width:2.7},hovertemplate:`LOWESS ${label}: %{y:.2f}%<extra></extra>`});
   }
-  return {traces,layout:layoutBase(),description:`${numFmt(count)} osservazioni con numerosità nota. ${numFmt(without)} misure senza n escluse dagli IC (non dalle altre analisi).${coalitionAvailability(rows)}`};
+  return {traces,layout:layoutBase(),description:`${numFmt(count)} osservazioni con numerosità nota. ${numFmt(without)} misure senza n escluse dagli IC (non dalle altre analisi).${coalitionAvailability(rows)}${traces.some(t=>t.name?.includes('somma stime individuali'))?' Per le coalizioni simulate dai singoli partiti, gli IC campionari NON sono calcolabili senza informazioni sulla covarianza: la curva è mostrata senza IC.':''}`};
 }
 
 function supermediaSnapshot(rows, parties, span=state.span) {
@@ -256,6 +348,24 @@ function renderSupermedia(rows) {
   const sourceRows=reportedActive()?reportedRows(state.coalitionPolls):coalitionActive()?chartRows(state.polls):state.polls;
   const snapshot=supermediaSnapshot(sourceRows,chartParties());
   let items=snapshot.items;
+  const syntheticNotes=[];
+  if(coalitionActive()){
+    const anchor=weekEndingSunday(state.polls.map(r=>r.date).sort().at(-1));
+    for(const party of [COALITION_KEY,COALITION_B_KEY]){
+      if(party===COALITION_B_KEY&&!secondCoalitionActive())continue;
+      if(items.some(d=>d.party===party))continue;
+      const estimated=estimatedCoalitionLatest(state.polls,coalitionParts(party),anchor);
+      if(!estimated){
+        syntheticNotes.push(`${partyLabel(party)}: impossibile comporre una stima attuale; almeno un partito non ha rilevazioni negli ultimi 21 giorni o la somma non è valida.`);
+        continue;
+      }
+      const {current,previous,previousDate}=estimated;
+      items.push({party,label:partyLabel(party),current:current.mean,
+        previous:previous?.mean??null,previousDate,latest:anchor,synthetic:true});
+      syntheticNotes.push(`${partyLabel(party)}: somma indicativa di stime dei singoli partiti (NON sondaggio diretto).${current.sparse.length?` Serie brevi, ultimi livelli osservati per: ${current.sparse.join(', ')}.`:''}${current.dated.length?` Componenti non contemporanei: ${current.dated.join(', ')}.`:''}`);
+    }
+    items.sort((a,b)=>b.current-a.current);
+  }
   let observedOnly=false;
   if(reportedActive() && items.length<2){
     items=supermediaObservedFallback(sourceRows,chartParties());
@@ -281,8 +391,8 @@ function renderSupermedia(rows) {
     width:.64,offset:-.35,marker:{color:colors,line:{width:0}},
     text:items.map(d=>`${d.current.toFixed(1)}%`),textposition:'outside',
     textfont:{size:14,color:'#29405c'},cliponaxis:false,
-    customdata:items.map(d=>[d.label,d.latest]),
-    hovertemplate:`%{customdata[0]}<br>${observedOnly?'Ultima rilevazione (non LOWESS)':'Ultima LOWESS'}: %{y:.2f}%<br>Settimana: %{customdata[1]}<extra></extra>`,showlegend:false};
+    customdata:items.map(d=>[d.label,d.latest,d.synthetic?'Simulazione: somma stime per partito':'Sondaggio/aggregazione della coalizione']),
+    hovertemplate:`%{customdata[0]}<br>${observedOnly?'Ultima rilevazione (non LOWESS)':'Ultima LOWESS'}: %{y:.2f}%<br>Settimana: %{customdata[1]}<br>%{customdata[2]}<extra></extra>`,showlegend:false};
   const layout=layoutBase();layout.barmode='overlay';layout.bargap=.18;
   layout.margin={l:58,r:22,t:28,b:94};layout.showlegend=false;
   layout.xaxis={...axes,type:'linear',showgrid:false,tickmode:'array',tickvals:xs,ticktext:items.map(d=>d.label),tickfont:{size:12,color:'#41536d'},range:[-.62,items.length-.38]};
@@ -298,7 +408,7 @@ function renderSupermedia(rows) {
   const sourceNote=reportedActive()?`Scenario Wikipedia: ${state.coalitionScenario}. `:'';
   let description;
   if(observedOnly)description=`${sourceNote}Ultime quote pubblicate: ${items.map(d=>`${d.label} (${d.latest})`).join('; ')}. NON sono supermedie né LOWESS. Nessuna interpolazione o previsione è stata eseguita.`;
-  else description=`${sourceNote}${items.length} serie (coalizioni e/o partiti) · ultimo riferimento ${snapshot.anchor}; ${historical?'confronto con LOWESS circa un anno prima. ':'confronto storico disattivato. '}La supermedia usa sempre l'intero archivio.`;
+  else description=`${sourceNote}${items.length} serie (coalizioni e/o partiti) · ultimo riferimento ${snapshot.anchor || weekEndingSunday(state.polls.map(r=>r.date).sort().at(-1))}; ${historical?'confronto con LOWESS circa un anno prima. ':'confronto storico disattivato. '}La supermedia usa sempre l'intero archivio. ${syntheticNotes.join(' ')}`;
   return {traces:historical?[previous,current]:[current],layout,description,gap,observedOnly};
 }
 

@@ -39,6 +39,7 @@ jobs:
           node tests/correlation.test.cjs
           node tests/test_export_branding.cjs
           node tests/house_effects.test.cjs
+          node tests/coalition_unlimited.test.cjs
       - name: Fetch new polls (retain last snapshot when source is unavailable)
         run: python scripts/fetch_polls.py
       - name: Commit any new data
